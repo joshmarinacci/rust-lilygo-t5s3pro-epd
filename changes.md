@@ -1,3 +1,24 @@
+## 2026-07-15
+
+Added 3-page ebook demo as an example binary; `src/main.rs` is unchanged.
+
+**New files**
+- `src/lib.rs` — minimal library root (`pub mod driver`) so examples can reference the driver
+- `examples/ebook.rs` — ebook page-turn demo
+
+**Changes to `src/driver/mod.rs`**
+- Re-exported `ed047tc1::PinConfig` as `driver::PinConfig` so the `pin_config!` macro works from outside the crate
+- Updated macro body to use `$crate::driver::PinConfig` (was `$crate::driver::ed047tc1::PinConfig`)
+
+**Ebook demo details**
+- Three pages of text using `FONT_10X20`, ~65 chars per line, ~17 lines per page
+- Chapter title + underline separator, body text, page-indicator dots (filled = current page)
+- Page navigation via GPIO0 (BOOT button, active-low, pull-up with `InputConfig`): press to advance, wraps back to page 1
+- `display.clear()` before every page: the waveform LUT only drives pixels toward black and leaves "white" pixels with no-drive (`0x00`), so previously-black pixels from the prior page would ghost unless the panel is unconditionally reset to white first via `push_pixels`
+- Serial monitor logs `flushing...` / `flush complete` around each `flush()` call for timing observation
+
+Flash and run: `cargo run --example ebook`
+
 ## 2026-07-14 18:50
 
 Fixed pixel ordering in `prepare_dma_buffer` (`src/driver/display.rs`):

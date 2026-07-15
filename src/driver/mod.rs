@@ -20,6 +20,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 pub use crate::driver::{
     display::{Display, DrawMode},
+    ed047tc1::PinConfig,
 };
 
 /// Build a [`PinConfig`] for the T5 E-Paper S3 Pro (hardware V2.3 / ESP32-S3).
@@ -28,7 +29,7 @@ macro_rules! pin_config {
     ($($name:ident),*) => {
         $(
             #[allow(unused_mut)]
-            $crate::driver::ed047tc1::PinConfig {
+            $crate::driver::PinConfig {
                 data0:   $name.GPIO5,
                 data1:   $name.GPIO6,
                 data2:   $name.GPIO7,
