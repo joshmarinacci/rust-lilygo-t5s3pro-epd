@@ -1,4 +1,25 @@
-## 2026-07-15
+## 2026-07-15 (graphics_test)
+
+Added `examples/graphics_test.rs` — comprehensive 7-screen graphics test.
+
+**New file: `examples/graphics_test.rs`**
+- Screen 0: Title page listing all screens, navigation hint
+- Screen 1: Shapes — 8 radiating lines, 5 concentric circles (filled + stroked), 4 stroke-width rectangles, triangle, grey-level line swatch
+- Screen 2: Typography — all 9 built-in fonts (`FONT_4X6` through `FONT_10X20`), underline via `underline_with_color`, strikethrough via `strikethrough_with_color`, left/centre/right alignment demo
+- Screen 3: Grayscale — 16 labelled bars (luma 0→15), 960×50 smooth gradient strip via `ImageRaw<Gray4, BigEndian>` embedded from `OUT_DIR/strip.bin`
+- Screen 4: Image — 960×270 four-quadrant test card (gradient / checkerboard / solid bands / Chebyshev rings) via `ImageRaw` from `OUT_DIR/card.bin`
+- Screen 5: Animation — 20-frame ball animation in a 120-row partial-refresh band; measures full-flush time (540 rows via `fill()`) and per-frame partial-flush time
+- Screen 6: Timing summary — `clear_ms`, `full_flush_ms`, `partial_avg_ms` with computed speedup ratio
+
+**Bug fix: `src/driver/display.rs`** — tainted-row dirty bitmap (`set_pixel` and `is_tainted`) divided by `TAINTED_ROWS_SIZE` (68) instead of 8, causing row-index collisions and preventing true partial refresh. Fixed to divide by 8; `1 << (row % 8)` correctly indexes the bit within each byte.
+
+**Updated: `build.rs`** — generates two synthetic image assets at compile time for the graphics_test example:
+- `OUT_DIR/card.bin` — 960×270 four-quadrant test card (129,600 bytes), 4-bit BigEndian Gray4
+- `OUT_DIR/strip.bin` — 960×50 horizontal gradient (24,000 bytes), 4-bit BigEndian Gray4
+
+Flash and run: `cargo run --example graphics_test`
+
+## 2026-07-15 (ebook)
 
 Added 3-page ebook demo as an example binary; `src/main.rs` is unchanged.
 

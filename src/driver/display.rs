@@ -110,7 +110,7 @@ impl<'a> Display<'a> {
     }
 
     pub fn set_pixel(&mut self, x: u16, y: u16, color: u8) -> Result<()> {
-        if x > Self::WIDTH || y > Self::HEIGHT {
+        if x >= Self::WIDTH || y >= Self::HEIGHT {
             return Err(Error::OutOfBounds);
         }
         if color > 0x0F {
@@ -123,8 +123,8 @@ impl<'a> Display<'a> {
         } else {
             self.framebuffer[index] = (value & 0xF0) | (color & 0x0F);
         }
-        let tainted_index = y as usize / TAINTED_ROWS_SIZE;
-        self.tainted_rows[tainted_index] |= 1 << ((y - (tainted_index as u16 * 8)) % 8);
+        let tainted_index = y as usize / 8;
+        self.tainted_rows[tainted_index] |= 1 << (y % 8);
         Ok(())
     }
 
@@ -242,8 +242,8 @@ impl<'a> Display<'a> {
     }
 
     fn is_tainted(&self, row: u16) -> bool {
-        let index = row as usize / TAINTED_ROWS_SIZE;
-        self.tainted_rows[index] & (1 << ((row - (index as u16 * 8)) % 8)) != 0
+        let index = row as usize / 8;
+        self.tainted_rows[index] & (1 << (row % 8)) != 0
     }
 
     const DRAW_IMAGE_FRAME_COUNT: usize = 15;
