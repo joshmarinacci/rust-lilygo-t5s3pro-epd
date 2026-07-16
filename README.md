@@ -43,6 +43,27 @@ cargo build --release
 espflash flash --chip esp32s3 target/xtensa-esp32s3-none-elf/release/epaper
 ```
 
+## Running Examples
+
+Flash and monitor an example with:
+
+```
+cargo run --example <name>
+```
+
+| Example | Description |
+|---------|-------------|
+| `ebook` | 3-page e-book demo; press the BOOT button (GPIO0) to advance pages |
+| `graphics_test` | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing |
+| `touch_button` | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar |
+
+**Example:**
+```
+cargo run --example touch_button
+```
+
+The `--monitor` flag is included automatically via `.cargo/config.toml`, so serial output appears in the terminal after flashing.
+
 ## Project Structure
 
 ```
