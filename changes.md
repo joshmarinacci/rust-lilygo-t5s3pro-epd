@@ -110,3 +110,72 @@ Initial project scaffold for Lilygo T5 E-Paper S3 Pro embedded Rust driver.
 - Created `build.rs` linking `linkall.x` (standard ESP32 pattern)
 - Created `src/main.rs` that initializes PSRAM, powers on the display, and performs a hardware clear to white
 - Build compiles cleanly with `cargo build`
+
+## 2026-07-16 (touch_button — GT911 Y axis calibration)
+
+Fixed GT911 Y coordinate spanning only ~42 pixels instead of the full 540.
+
+**Root cause**: The GT911 on this hardware outputs Y raw values in a hardware-specific sub-range (~1946–8240) rather than the full 0–65535 span used by the X axis. Dividing by `u16::MAX` (65535) produced only ~42 pixels of effective Y travel even across the full screen height.
+
+**Fix**: Added `y_raw_min` and `y_raw_max` fields to `Gt911` (defaults 1946/8240, calibrated from observed tap data). `read_touch()` now clamps to this range and inverts in one step: `y = (y_raw_max - y_raw) * y_max / (y_raw_max - y_raw_min)`. Added `set_y_raw_range(min, max)` for future hardware-specific overrides.
+
+**Derivation**: Observed y_raw≈7424 at button top (y≈70) and y_raw≈2307 at button bottom (y≈509). Extrapolated to screen edges: top y=0 → y_raw≈8240, bottom y=540 → y_raw≈1946.
+
+**Files changed**:
+- `src/driver/gt911.rs` — `Gt911` struct gains `y_raw_min`/`y_raw_max`; `new()` defaults to measured values; `read_touch()` uses calibrated Y range; added `set_y_raw_range()`
+
+## 2026-07-16 (touch_button — GT911 coordinate scaling)
+
+Fixed GT911 touch coordinates reporting raw 16-bit sensor values instead of display pixel coordinates.
+
+**Root cause**: The GT911 outputs raw sensor coordinates in a 0–65535 range regardless of the `X_output_max`/`Y_output_max` config registers. The `read_touch()` function was returning the raw values directly.
+
+**Fix**: Added `x_max`/`y_max` fields to `Gt911` struct (set by `configure()`). `read_touch()` now scales raw coordinates to display pixel space: `pixel = raw * max / 65535`.
+
+**Files changed**:
+- `src/driver/gt911.rs` — `Gt911` struct gains `x_max: u16, y_max: u16`; `configure()` saves them; `read_touch()` scales output when max fields are set
+
+## 2026-07-16 (touch_button — button background clearing on toggle)
+
+Fixed button not clearing when tapping a second time to return to the outline (Empty) state.
+
+**Root cause**: The `BlackOnWhite` waveform is darken-only. `lut_default = 0x55` drives all pixels toward black; `update_lut` progressively changes entries for lighter target pixels from `01` (black-drive) to `00` (VCOM/neutral). White-target pixels get VCOM for all 15 frames — so previously-black pixels are left black, since VCOM produces no net drive on the panel.
+
+**Fix**: Added `display.clear_area()` on the button bounds before `draw_button(Empty)`, same as the existing status-bar fix. This uses AC voltage cycles to physically drive the button interior back to white before the waveform renders the new outline.
+
+**Files changed**:
+- `examples/touch_button.rs` — added `clear_area()` call in the `ButtonState::Empty` arm of the tap handler
+
+## 2026-07-16 (touch_button — status bar background clearing)
+
+Fixed status bar text background not being cleared between touch events.
+
+**Root cause**: The display waveform LUT uses only the target framebuffer value as its index. After each `flush()`, the framebuffer is reset to `0xFF` (white). When `update_status()` filled rows 0-59 with white via embedded-graphics, the framebuffer values were unchanged (already `0xFF`), so the waveform had no information about the previous display state (e.g. old black text pixels). The LUT cannot drive previously-black pixels to white without knowing they were black.
+
+**Fix**: Added a `display.clear_area()` call at the start of `update_status()`. This uses AC voltage cycles (darken + lighten) to physically drive the status bar cells to white before the framebuffer-based `flush()` renders the new text. Kept the embedded-graphics white rectangle fill so that `flush()` taints and re-drives all 60 status rows consistently.
+
+**Files changed**:
+- `examples/touch_button.rs` — added `use epaper::driver::display::Rectangle as EpdRect`, added `display.clear_area(EpdRect { x: 0, y: 0, width: 960, height: STATUS_H as u16 })` at start of `update_status()`
+
+## 2026-07-16 (touch debugging — GT911 config)
+
+Debugged GT911 touch controller — IC communicates but digitizer not detected.
+
+**Root cause found**: The GT911 config block had `version=0x00` (never programmed). With invalid/uninitialized config, the GT911 enters an "awaiting host configuration" state and does NOT start the scan engine (status register stays 0x00 indefinitely). Writing a valid 184-byte config block with correct checksum and 0x01 to the config-fresh register (0x8100) triggers the scan engine.
+
+**Fix applied**: Added `Gt911::configure(i2c, x_max, y_max)` that writes a valid config with INT mode 1 (falling edge), touch threshold 0x01, 5-point max touch, and 5ms scan rate. Config readback confirms correct write: x_res=960, y_res=540, max_touch=5, int_mode=0x01.
+
+**Outstanding hardware issue**: Even with the GT911 scanning (brief 0x80 burst observed at ~1.2s after config reload), the status register never shows count>0 during physical tapping. Tapping was confirmed during a 10s pure-poll diagnostic loop and a 2-minute main loop. This is consistent with the touch digitizer FPC cable not being connected to the GT911 module, or a board variant with GT911 populated but no digitizer attached. Hardware inspection of a second FPC connector on the board is needed.
+
+**New files/methods added**:
+- `Gt911::configure(i2c, x_max, y_max)` — writes full 184-byte config block
+- `Gt911::read_config(i2c)` — reads 7 config bytes for diagnostics  
+- `Gt911::read_status_raw(i2c)` — reads status without clearing (diagnostics)
+- `Gt911::clear_status(i2c)` — write 0x00 to clear buffer-ready flag
+- `Display::configure_touch(gt911, x_max, y_max)` — routes config write
+- `Display::touch_read_config(gt911)` — routes config read
+- `Display::touch_read_status_raw(gt911)` — routes raw status read
+- `Display::touch_clear_status(gt911)` — routes status clear
+- `Display::i2c_scan()` — scans all I2C addresses (diagnostic helper)
+
+I2C scan reveals devices at: 0x20 (PCA9555), 0x51 (RTC), 0x55 (unknown), 0x68 (TPS65185), 0x6B (unknown). GT911 at 0x5D responds to write_read but not naked read (expected behavior).

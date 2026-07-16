@@ -157,10 +157,53 @@ impl<'a> Display<'a> {
         gt911.read_touch(self.epd.i2c())
     }
 
+    /// Write a valid GT911 configuration block so it starts scanning.
+    /// Call this if the GT911 was never configured (config version = 0x00).
+    pub fn configure_touch(&mut self, gt911: &mut crate::driver::gt911::Gt911, x_max: u16, y_max: u16) {
+        gt911.configure(self.epd.i2c(), x_max, y_max);
+    }
+
+    /// Clear the GT911 buffer-ready flag and set coordinate-output mode.
+    pub fn init_touch(&mut self, gt911: &mut crate::driver::gt911::Gt911) {
+        gt911.init(self.epd.i2c());
+    }
+
+    /// Read the GT911 4-byte product ID ("911\0" if genuine).
+    pub fn touch_product_id(&mut self, gt911: &mut crate::driver::gt911::Gt911) -> [u8; 4] {
+        gt911.product_id(self.epd.i2c())
+    }
+
     /// Probe both GT911 I2C addresses and return the one that ACKs.
     /// Returns `None` if no touch controller is found on the bus.
     pub fn detect_touch_addr(&mut self) -> Option<u8> {
         crate::driver::gt911::Gt911::detect(self.epd.i2c())
+    }
+
+    /// Read GT911 config registers for diagnostics.
+    /// Returns [version, x_lo, x_hi, y_lo, y_hi, max_touch, int_mode]
+    pub fn touch_read_config(&mut self, gt911: &mut crate::driver::gt911::Gt911) -> [u8; 7] {
+        gt911.read_config(self.epd.i2c())
+    }
+
+    /// Read the raw GT911 status register byte for diagnostics.
+    pub fn touch_read_status_raw(&mut self, gt911: &mut crate::driver::gt911::Gt911) -> u8 {
+        gt911.read_status_raw(self.epd.i2c())
+    }
+
+    /// Write 0x00 to the GT911 status register to clear the buffer-ready flag.
+    pub fn touch_clear_status(&mut self, gt911: &mut crate::driver::gt911::Gt911) {
+        gt911.clear_status(self.epd.i2c())
+    }
+
+    /// Scan all 7-bit I2C addresses and print those that ACK (for diagnostics).
+    pub fn i2c_scan(&mut self) {
+        let i2c = self.epd.i2c();
+        for addr in 0x00u8..=0x7F {
+            let mut buf = [0u8; 1];
+            if i2c.read(addr, &mut buf).is_ok() {
+                esp_println::println!("  I2C ACK at 0x{:02X}", addr);
+            }
+        }
     }
 
     pub fn repair(&mut self, delay: Delay) -> Result<()> {
