@@ -151,6 +151,18 @@ impl<'a> Display<'a> {
         self.clear_area(Self::BOUNDING_BOX)
     }
 
+    /// Poll the GT911 touch controller for the first active touch point.
+    /// Returns `Some((x, y))` when a finger is down, `None` otherwise.
+    pub fn read_touch(&mut self, gt911: &mut crate::driver::gt911::Gt911) -> Option<(u16, u16)> {
+        gt911.read_touch(self.epd.i2c())
+    }
+
+    /// Probe both GT911 I2C addresses and return the one that ACKs.
+    /// Returns `None` if no touch controller is found on the bus.
+    pub fn detect_touch_addr(&mut self) -> Option<u8> {
+        crate::driver::gt911::Gt911::detect(self.epd.i2c())
+    }
+
     pub fn repair(&mut self, delay: Delay) -> Result<()> {
         debug!("display repair");
         self.clear()?;

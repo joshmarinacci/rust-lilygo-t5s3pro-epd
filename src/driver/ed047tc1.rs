@@ -313,6 +313,12 @@ impl<'a> ED047TC1<'a> {
         Ok(())
     }
 
+    // ── I2C bus access (for touch controller sharing) ─────────────────────────
+
+    pub(crate) fn i2c(&mut self) -> &mut I2c<'a, Blocking> {
+        &mut self.i2c
+    }
+
     // ── PCA9555 helpers ───────────────────────────────────────────────────────
 
     fn pca_flush(&mut self) {

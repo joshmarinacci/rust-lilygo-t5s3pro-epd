@@ -2,6 +2,7 @@ extern crate alloc;
 
 pub mod display;
 pub mod graphics;
+pub mod gt911;
 pub(crate) mod ed047tc1;
 pub(crate) mod rmt;
 
@@ -21,6 +22,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub use crate::driver::{
     display::{Display, DrawMode},
     ed047tc1::PinConfig,
+    gt911::Gt911,
 };
 
 /// Build a [`PinConfig`] for the T5 E-Paper S3 Pro (hardware V2.3 / ESP32-S3).

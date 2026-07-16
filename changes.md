@@ -1,3 +1,33 @@
+## 2026-07-15 (touch_button)
+
+Added GT911 touch controller support and `examples/touch_button.rs`.
+
+**New file: `src/driver/gt911.rs`**
+- Minimal GT911 capacitive touch driver (polling, no INT pin required)
+- `Gt911::new(addr)` — construct with I2C address (0x5D primary, 0x14 alternate)
+- `Gt911::read_touch(i2c)` — reads status register 0x814E, returns first touch point coordinates from 0x8150, clears buffer-ready flag after each read
+- `Gt911::detect(i2c)` — probes both addresses and returns the one that ACKs
+
+**Modified: `src/driver/ed047tc1.rs`**
+- Added `i2c()` method exposing `&mut I2c<'_, Blocking>` so the Display layer can pass the bus to touch reads
+
+**Modified: `src/driver/display.rs`**
+- Added `read_touch(&mut self, gt911: &mut Gt911) -> Option<(u16, u16)>` — polls GT911 via the driver's internal I2C
+- Added `detect_touch_addr(&mut self) -> Option<u8>` — finds the active GT911 address at startup
+
+**Modified: `src/driver/mod.rs`**
+- Added `pub mod gt911` and re-exported `Gt911`
+
+**New file: `examples/touch_button.rs`**
+- Detects GT911 address on boot; warns if not found
+- Draws a 360×160 px button centered on screen (rows 190–350)
+- Toggle between outline-only and filled-black on each tap
+- Uses partial refresh (only button rows flushed) for low-latency redraws
+- Prints `touch at (x, y)` and `flush Nms` per tap to serial monitor
+- Debounces: waits for finger-lift before accepting next tap
+
+Flash and run: `cargo run --example touch_button`
+
 ## 2026-07-15 (graphics_test)
 
 Added `examples/graphics_test.rs` — comprehensive 7-screen graphics test.
