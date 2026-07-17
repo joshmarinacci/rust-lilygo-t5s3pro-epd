@@ -24,24 +24,11 @@ pub struct Gt911 {
     pub addr: u8,
     x_max: u16,
     y_max: u16,
-    // Raw Y sensor range for this hardware (observed: top=8240, bottom=1946).
-    // Y is physically inverted: larger raw values are at the physical top of screen.
-    y_raw_min: u32,
-    y_raw_max: u32,
 }
 
 impl Gt911 {
     pub fn new(addr: u8) -> Self {
-        Self { addr, x_max: 0, y_max: 0, y_raw_min: 1946, y_raw_max: 8240 }
-    }
-
-    /// Override the Y sensor raw range used for coordinate scaling.
-    /// Tap the physical top-left and bottom-left corners and record the raw Y values
-    /// to calibrate precisely. Defaults (min=1946, max=8240) were measured on
-    /// the Lilygo T5 S3 Pro.
-    pub fn set_y_raw_range(&mut self, raw_min: u32, raw_max: u32) {
-        self.y_raw_min = raw_min;
-        self.y_raw_max = raw_max;
+        Self { addr, x_max: 0, y_max: 0 }
     }
 
     /// Write a valid configuration so the GT911 starts scanning.
@@ -131,21 +118,13 @@ impl Gt911 {
         let mut pt = [0u8; 8];
         i2c.write_read(self.addr, &REG_TOUCH0, &mut pt).ok()?;
 
-        let x_raw = u16::from_le_bytes([pt[1], pt[2]]);
-        let y_raw = u16::from_le_bytes([pt[3], pt[4]]);
-        let (x, y) = if self.x_max > 0 && self.y_max > 0 {
-            // X spans the full 16-bit sensor range.
-            let x_scaled = (x_raw as u32 * self.x_max as u32 / u16::MAX as u32) as u16;
-            // Y spans a hardware-specific sub-range and is physically inverted
-            // (large raw values at physical top of screen, small at bottom).
-            // Clamp to the calibrated range then map to 0..y_max.
-            let y_u32 = (y_raw as u32).clamp(self.y_raw_min, self.y_raw_max);
-            let y_scaled = ((self.y_raw_max - y_u32) * self.y_max as u32
-                / (self.y_raw_max - self.y_raw_min)) as u16;
-            (x_scaled, y_scaled)
-        } else {
-            (x_raw, y_raw)
-        };
+        // Byte layout (empirically verified):
+        // [0]=Y_low [1]=Y_high [2]=X_low [3]=X_high [4]=touch_area_low [5]=touch_area_high
+        // X is in 0..x_max (correct orientation).
+        // Y is physically inverted: raw y=y_max is the physical top of the screen.
+        let x = u16::from_le_bytes([pt[2], pt[3]]).min(self.x_max);
+        let y_raw = u16::from_le_bytes([pt[0], pt[1]]).min(self.y_max);
+        let y = self.y_max - y_raw;
         Some((x, y))
     }
 

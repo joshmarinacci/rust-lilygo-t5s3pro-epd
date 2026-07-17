@@ -1,3 +1,13 @@
+## 2026-07-17 (gt911 byte layout fix)
+
+Fixed GT911 touch coordinate byte offsets, inverted Y axis, and removed wrong scaling.
+
+**Modified: `src/driver/gt911.rs`**
+- Fixed `read_touch`: actual layout is Y at [0,1], X at [2,3], touch area at [4,5] (was reading X from [1,2], Y from [3,4])
+- Y is physically inverted: raw y=y_max is the physical top of the screen; corrected with `y = y_max - y_raw`
+- Removed incorrect 16-bit scaling (`x_raw * x_max / 65535`); the GT911 outputs coordinates directly in the configured range (0..x_max, 0..y_max) after `configure()` is called
+- Removed y_raw_min/y_raw_max calibration fields and `set_y_raw_range()` — no longer needed
+
 ## 2026-07-15 (touch_button)
 
 Added GT911 touch controller support and `examples/touch_button.rs`.
