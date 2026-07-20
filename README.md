@@ -56,6 +56,8 @@ cargo run --example <name>
 | `ebook` | 3-page e-book demo; press the BOOT button (GPIO0) to advance pages |
 | `graphics_test` | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing |
 | `touch_button` | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar |
+| `backlight` | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO47 |
+| `finger_draw` | Touch drawing demo; paint 16×16 px dots wherever your finger moves; partial-refresh timing printed to serial |
 
 **Example:**
 ```

@@ -1,3 +1,18 @@
+## 2026-07-20
+
+**Added: `examples/finger_draw.rs` — touch finger-drawing demo**
+- Draws a 16×16 px filled black dot at each touch position using partial refresh.
+- No erasing — pixels accumulate, letting you judge the display's maximum refresh cadence.
+- Each dot flush only updates the 16 dirty rows, so partial refresh completes in a fraction of a full-screen update time.
+- Timing (`flush=Xms`) and dot count printed to serial for each stroke.
+- Drawing area is the full screen below a thin header; header stays physically on screen without being re-sent.
+
+**Added: `examples/backlight.rs` — frontlight PWM demo**
+- New example that drives the Lilygo T5 S3 Pro frontlight (GPIO47) using the ESP32-S3 LEDC peripheral with 1 kHz 8-bit PWM.
+- Draws a static label on the e-paper display, then enters a loop fading the backlight from 0% → 100% over ~2 s, holds for 1 s, then fades back to 0%.
+- Prints brightness percentage to serial each step.
+- Updated README examples table with the new entry.
+
 ## 2026-07-19
 
 Rendering fixes, touch_button improvements, and waveform documentation.
