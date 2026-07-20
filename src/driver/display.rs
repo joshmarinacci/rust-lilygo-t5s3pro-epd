@@ -307,17 +307,18 @@ impl<'a> Display<'a> {
 
         for k in 0..Self::DRAW_IMAGE_FRAME_COUNT {
             update_lut(&mut lut, k, mode);
+            self.skipping = 0;
             self.epd.frame_start()?;
             for y in 0..Self::HEIGHT {
                 if !self.is_tainted(y) {
-                    self.epd.skip()?;
+                    self.row_skip(mode.contrast_cycles()[k])?;
                     continue;
                 }
                 let start = y as usize * LINE_BYTES_4BPP;
                 let end = start + LINE_BYTES_4BPP;
                 let buf = prepare_dma_buffer(&self.framebuffer[start..end], &lut);
                 self.epd.set_buffer(buf.as_slice())?;
-                self.epd.output_row(mode.contrast_cycles()[k])?;
+                self.row_write(mode.contrast_cycles()[k])?;
             }
             if self.skipping == 0 {
                 self.row_write(mode.contrast_cycles()[k])?;

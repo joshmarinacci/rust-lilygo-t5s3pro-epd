@@ -1,3 +1,22 @@
+## 2026-07-19
+
+Rendering fixes, touch_button improvements, and waveform documentation.
+
+**Fixed: `src/driver/display.rs` — partial refresh column bleeding**
+- `draw()` was calling `self.epd.skip()` directly for non-tainted rows, bypassing `row_skip()`. This left the source drivers holding the last active row's pixel data during skip CKV pulses, causing the column range of any drawn region to bleed black top-to-bottom across the full display height over 15 waveform frames.
+- Fix: use `self.row_skip()` / `self.row_write()` throughout `draw()` and reset `self.skipping = 0` at the start of each frame, so the first skip after active rows sends a blank buffer that clears the source drivers.
+
+**Updated: `examples/touch_button.rs`**
+- Shrunk button from 800×440 to 200×60 px centered on screen to measure raw partial-refresh speed.
+- Removed status bar (text, constants, `update_status` helper, `Buf` struct) so only the button region is flushed.
+- Replaced `clear_area()` + `BlackOnWhite` with a universal two-pass waveform approach:
+  - Pass 1: `WhiteOnBlack` with all-white framebuffer drives every pixel in the button area to white for all 15 frames, establishing a known-white physical state.
+  - Pass 2: `BlackOnWhite` renders the actual button content (fill or stroke+text) on that clean canvas.
+  - Eliminates `clear_area()` (32 full hardware scans) for both state transitions; both filled and empty states now render correctly in both passes.
+
+**Updated: `README.md`**
+- Replaced the partial-refresh "LUT only drives toward black" note (incorrect) with a full "Waveform Engine & DrawMode" section covering: how the 15-frame LUT engine works, 2-bit waveform code meanings, DrawMode semantics, the two-pass pattern, and a latency vs quality tradeoff table.
+
 ## 2026-07-17 (gt911 byte layout fix)
 
 Fixed GT911 touch coordinate byte offsets, inverted Y axis, and removed wrong scaling.
