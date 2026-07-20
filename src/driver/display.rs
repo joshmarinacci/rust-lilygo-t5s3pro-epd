@@ -195,6 +195,30 @@ impl<'a> Display<'a> {
         gt911.clear_status(self.epd.i2c())
     }
 
+    /// Read one byte from an arbitrary I2C device on the shared bus.
+    pub fn i2c_read_u8(&mut self, addr: u8, reg: u8) -> u8 {
+        let i2c = self.epd.i2c();
+        let mut buf = [0u8; 1];
+        let _ = i2c.write_read(addr, &[reg], &mut buf);
+        buf[0]
+    }
+
+    /// Read two bytes (little-endian u16) from an arbitrary I2C device on the shared bus.
+    pub fn i2c_read_u16(&mut self, addr: u8, reg: u8) -> u16 {
+        let i2c = self.epd.i2c();
+        let mut buf = [0u8; 2];
+        let _ = i2c.write_read(addr, &[reg], &mut buf);
+        u16::from_le_bytes(buf)
+    }
+
+    /// Read two bytes (little-endian i16) from an arbitrary I2C device on the shared bus.
+    pub fn i2c_read_i16(&mut self, addr: u8, reg: u8) -> i16 {
+        let i2c = self.epd.i2c();
+        let mut buf = [0u8; 2];
+        let _ = i2c.write_read(addr, &[reg], &mut buf);
+        i16::from_le_bytes(buf)
+    }
+
     /// Scan all 7-bit I2C addresses and print those that ACK (for diagnostics).
     pub fn i2c_scan(&mut self) {
         let i2c = self.epd.i2c();

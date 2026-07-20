@@ -61,6 +61,7 @@ cargo run --example <name>
 | `touch_button` | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar |
 | `backlight` | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11 |
 | `finger_draw` | Touch drawing demo; paint 16×16 px dots wherever your finger moves; partial-refresh timing printed to serial |
+| `battery_status` | Dashboard showing live readings from the BQ27220 fuel gauge and BQ25896 charger; refreshes every 10 s |
 
 **Example:**
 ```

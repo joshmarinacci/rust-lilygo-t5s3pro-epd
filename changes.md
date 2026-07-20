@@ -1,3 +1,14 @@
+## 2026-07-20 (3)
+
+**Added: `examples/battery_status.rs` — BQ27220 + BQ25896 dashboard**
+- Reads all useful registers from both chips via the display's shared I2C bus and renders a two-column dashboard on the e-paper screen, refreshing every 10 s.
+- Left column (BQ27220 fuel gauge): state of charge %, voltage, current + direction, remaining/full capacity, state of health, temperature.
+- Right column (BQ25896 charger): USB presence, charge status, VBUS voltage, battery voltage, system voltage, charge current.
+- All readings also logged to serial each cycle.
+
+**Added: `i2c_read_u8 / i2c_read_u16 / i2c_read_i16` to `Display`**
+- Generic I2C passthrough helpers on the shared bus, used by `battery_status` to reach the battery chips without opening a second I2C port.
+
 ## 2026-07-20 (2)
 
 **Fixed: `examples/backlight.rs` — wrong GPIO**
