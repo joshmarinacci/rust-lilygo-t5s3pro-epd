@@ -12,6 +12,9 @@ Embedded Rust driver for the **Lilygo T5 E-Paper S3 Pro** — an ESP32-S3 board 
 | PMIC | TPS65185 (I2C 0x68) — controls display voltage rails and VCOM |
 | I/O expander | PCA9555 (I2C 0x20, SDA=GPIO39, SCL=GPIO40) — controls OE/MODE/PWRUP/VCOM_CTRL/WAKEUP |
 | PSRAM | 8 MB OctalSPI — required for the 325 KB framebuffer |
+| Battery charger | BQ25896 (I2C) — single-cell LiPo charging with USB power-path |
+| Fuel gauge | BQ27220 (I2C) — state of charge, voltage, current, runtime estimate |
+| Backlight | GPIO11 (BOARD_BL_EN) — PWM-controllable frontlight |
 
 ## Prerequisites
 
@@ -56,7 +59,7 @@ cargo run --example <name>
 | `ebook` | 3-page e-book demo; press the BOOT button (GPIO0) to advance pages |
 | `graphics_test` | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing |
 | `touch_button` | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar |
-| `backlight` | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO47 |
+| `backlight` | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11 |
 | `finger_draw` | Touch drawing demo; paint 16×16 px dots wherever your finger moves; partial-refresh timing printed to serial |
 
 **Example:**

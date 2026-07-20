@@ -29,9 +29,6 @@ use epaper::driver::{Display, DrawMode};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// Lilygo T5 S3 Pro frontlight pin
-const BACKLIGHT_GPIO: u8 = 47;
-
 #[main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
@@ -97,7 +94,7 @@ fn main() -> ! {
     .unwrap();
 
     Text::with_alignment(
-        &alloc::format!("GPIO{}", BACKLIGHT_GPIO),
+        "BOARD_BL_EN = GPIO11",
         Point::new(480, 310),
         style,
         Alignment::Center,
@@ -121,7 +118,7 @@ fn main() -> ! {
         })
         .unwrap();
 
-    let mut channel0 = ledc.channel(channel::Number::Channel0, peripherals.GPIO47);
+    let mut channel0 = ledc.channel(channel::Number::Channel0, peripherals.GPIO11);
     channel0
         .configure(channel::config::Config {
             timer: &lstimer0,
@@ -130,7 +127,7 @@ fn main() -> ! {
         })
         .unwrap();
 
-    println!("Backlight demo running on GPIO{}", BACKLIGHT_GPIO);
+    println!("Backlight demo running on GPIO11 (BOARD_BL_EN)");
 
     // ── Fade loop ─────────────────────────────────────────────────────────────
     loop {

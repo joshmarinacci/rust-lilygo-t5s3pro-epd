@@ -1,3 +1,10 @@
+## 2026-07-20 (2)
+
+**Fixed: `examples/backlight.rs` — wrong GPIO**
+- Was using GPIO47 (BOARD_LORA_BUSY) instead of GPIO11 (BOARD_BL_EN).
+- Confirmed from official board definition in Lilygo's T5S3-4.7-e-paper-PRO repo.
+- Updated README hardware table to document backlight pin, BQ25896 charger, and BQ27220 fuel gauge.
+
 ## 2026-07-20
 
 **Added: `examples/finger_draw.rs` — touch finger-drawing demo**
