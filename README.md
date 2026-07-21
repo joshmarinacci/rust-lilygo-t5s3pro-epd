@@ -71,7 +71,8 @@ cargo run --example <name>
 
 | Example          | Description                                                                                                  |
 |------------------|--------------------------------------------------------------------------------------------------------------|
-| `ebook`          | 3-page e-book demo; BOOT (GPIO0) = previous page, GPIO38 = next page                                         |
+| `clock`          | Deep-sleep clock; draws HH:MM:SS, sleeps 10 s, wakes and redraws; set `INITIAL_HH/MM/SS` before flashing    |
+| `ebook`          | 3-page e-book demo; BOOT (GPIO0) = previous page, GPIO38 = next page; hold GPIO38 to cycle orientation       |
 | `graphics_test`  | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing                             |
 | `touch_button`   | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar                        |
 | `backlight`      | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11                                |

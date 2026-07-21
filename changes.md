@@ -1,3 +1,12 @@
+## 2026-07-21 (3)
+
+**Added: `examples/clock.rs` — deep-sleep e-paper clock**
+- On every boot: reads `rtc.current_time_us()` (survives deep sleep via RTC STORE2/STORE3), formats as `HH:MM:SS`, draws on display, then calls `rtc.sleep_deep()` for 10 seconds.
+- On first boot (non-`CoreDeepSleep` reset reason): seeds the RTC with `INITIAL_HH/MM/SS` constants the user sets before flashing.
+- Uses `Rtc::new(peripherals.LPWR)` + `TimerWakeupSource` from `esp_hal::rtc_cntl` — no new crate dependencies.
+- Display is powered off after each flush; e-paper retains the image with no power.
+- Set `SLEEP_SECS = 3` for faster iteration during testing.
+
 ## 2026-07-21 (2)
 
 **Updated: `examples/ebook.rs` — two-button navigation + four-way orientation**
