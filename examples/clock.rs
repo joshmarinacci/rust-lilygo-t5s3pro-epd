@@ -6,8 +6,11 @@ extern crate alloc;
 use alloc::format;
 
 use esp_backtrace as _;
-use esp_hal::{main, system::Cpu};
-use esp_hal::rtc_cntl::{reset_reason, Rtc, SocResetReason, sleep::TimerWakeupSource};
+use esp_hal::{main, system::{Cpu, SleepSource}};
+use esp_hal::rtc_cntl::{
+    reset_reason, wakeup_cause, Rtc, SocResetReason,
+    sleep::{Ext0WakeupSource, TimerWakeupSource, WakeupLevel},
+};
 use esp_println::println;
 
 use embedded_graphics::{
@@ -34,7 +37,7 @@ const SLEEP_SECS: u64 = 10;
 
 // ── Drawing ───────────────────────────────────────────────────────────────────
 
-fn draw_clock(display: &mut Display, time_str: &str, is_first_boot: bool) {
+fn draw_clock(display: &mut Display, time_str: &str, status: &str) {
     let heading = MonoTextStyle::new(&FONT_10X20, Gray4::BLACK);
     let small   = MonoTextStyle::new(&FONT_7X13,  Gray4::BLACK);
     let border2 = PrimitiveStyle::with_stroke(Gray4::BLACK, 2);
@@ -73,7 +76,6 @@ fn draw_clock(display: &mut Display, time_str: &str, is_first_boot: bool) {
     ).draw(display).unwrap();
 
     // Status lines at bottom
-    let status = if is_first_boot { "First boot — time initialised" } else { "Woke from deep sleep" };
     Text::with_alignment(status, Point::new(480, 390), small, Alignment::Center)
         .draw(display).unwrap();
 
@@ -106,12 +108,26 @@ fn main() -> ! {
     };
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram, psram_config);
 
+    // Take GPIO0 here, before Display::new() consumes peripherals via pin_config!.
+    // GPIO0 (BOOT button) is RTC-capable and used as the Ext0 deep-sleep wakeup pin.
+    let gpio0 = peripherals.GPIO0;
+
     let mut rtc = Rtc::new(peripherals.LPWR);
 
     // Detect whether this boot is a wakeup from deep sleep or a fresh reset.
     let is_deep_sleep_wakeup =
         reset_reason(Cpu::ProCpu) == Some(SocResetReason::CoreDeepSleep);
     let is_first_boot = !is_deep_sleep_wakeup;
+
+    let status_str = if is_first_boot {
+        "First boot — time initialised"
+    } else {
+        match wakeup_cause() {
+            SleepSource::Ext0  => "Woke: BOOT button pressed",
+            SleepSource::Timer => "Woke: timer (10 s)",
+            _                  => "Woke from deep sleep",
+        }
+    };
 
     if is_first_boot {
         // Seed the RTC clock. The stored offset in STORE2/STORE3 survives
@@ -129,7 +145,7 @@ fn main() -> ! {
     let ss = total_secs % 60;
     let time_str = format!("{:02}:{:02}:{:02}", hh, mm, ss);
 
-    println!("clock: {} — sleeping {}s", time_str, SLEEP_SECS);
+    println!("clock: {} | {} — sleeping {}s", time_str, status_str, SLEEP_SECS);
 
     // ── Display ───────────────────────────────────────────────────────────────
     let mut display = Display::new(
@@ -143,11 +159,13 @@ fn main() -> ! {
 
     display.power_on();
     display.clear().unwrap();
-    draw_clock(&mut display, &time_str, is_first_boot);
+    draw_clock(&mut display, &time_str, status_str);
     display.flush(DrawMode::BlackOnWhite).unwrap();
     display.power_off(); // e-paper retains image with no power
 
     // ── Deep sleep ────────────────────────────────────────────────────────────
+    // Wakes on either: timer expiry OR BOOT button (GPIO0, active-low).
     let timer = TimerWakeupSource::new(core::time::Duration::from_secs(SLEEP_SECS));
-    rtc.sleep_deep(&[&timer]); // → ! chip reboots on wakeup
+    let boot  = Ext0WakeupSource::new(gpio0, WakeupLevel::Low);
+    rtc.sleep_deep(&[&timer, &boot]); // → ! chip reboots on wakeup
 }

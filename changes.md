@@ -1,3 +1,11 @@
+## 2026-07-21 (4)
+
+**Updated: `examples/clock.rs` — add BOOT button (GPIO0) as deep-sleep wakeup source**
+- Added `Ext0WakeupSource::new(gpio0, WakeupLevel::Low)` alongside the existing `TimerWakeupSource`.
+- Pressing BOOT immediately wakes the device and redraws the clock, in addition to the 10-second timer.
+- `wakeup_cause()` is checked on each wakeup; the status line on the display and serial output now report whether the wakeup was triggered by the button (`Ext0`) or the timer.
+- GPIO0 is taken from `peripherals` before `Display::new()` so the pin is available for `Ext0WakeupSource` while `pin_config!` still gets the 15 display pins it needs.
+
 ## 2026-07-21 (3)
 
 **Added: `examples/clock.rs` — deep-sleep e-paper clock**
