@@ -12,7 +12,12 @@ use esp_hal::{
 use esp_println::println;
 
 use embedded_graphics::{
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    draw_target::DrawTarget,
+    geometry::OriginDimensions,
+    mono_font::{
+        ascii::{FONT_10X20, FONT_9X18},
+        MonoFont, MonoTextStyle,
+    },
     pixelcolor::Gray4,
     prelude::*,
     primitives::{Line, PrimitiveStyle, Rectangle},
@@ -23,9 +28,96 @@ use epaper::driver::{Display, DrawMode};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// Forward button is on GPIO38 (confirmed via find_button diagnostic).
+// Forward button on GPIO38 (confirmed via find_button diagnostic).
 
-// Three pages of ebook content, ~65 chars per line with FONT_10X20 (10px/char)
+// ── Orientation ───────────────────────────────────────────────────────────────
+
+#[derive(Copy, Clone, PartialEq)]
+enum Orientation {
+    Deg0,   // landscape, normal
+    Deg90,  // portrait,  90° CW content (hold device with left edge up)
+    Deg180, // landscape, upside-down
+    Deg270, // portrait,  90° CCW content (hold device with right edge up)
+}
+
+impl Orientation {
+    fn next(self) -> Self {
+        match self {
+            Self::Deg0   => Self::Deg90,
+            Self::Deg90  => Self::Deg180,
+            Self::Deg180 => Self::Deg270,
+            Self::Deg270 => Self::Deg0,
+        }
+    }
+
+    fn is_portrait(self) -> bool {
+        matches!(self, Self::Deg90 | Self::Deg270)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Deg0   => "landscape 0°",
+            Self::Deg90  => "portrait 90°",
+            Self::Deg180 => "landscape 180°",
+            Self::Deg270 => "portrait 270°",
+        }
+    }
+}
+
+// ── Rotated display wrapper ───────────────────────────────────────────────────
+//
+// Logical canvas size and pixel mapping per orientation (W=960, H=540):
+//   Deg0:   size 960×540,  (x,y) → (x,       y      )
+//   Deg90:  size 540×960,  (x,y) → (W-1-y,   x      )
+//   Deg180: size 960×540,  (x,y) → (W-1-x,   H-1-y  )
+//   Deg270: size 540×960,  (x,y) → (y,        H-1-x  )
+//
+// 'd = borrow lifetime, 'hw = Display's hardware peripheral lifetime.
+// Keeping them separate lets the borrow end at the closing brace of the
+// block where RotatedDisplay is used, freeing `display` for the flush call.
+struct RotatedDisplay<'d, 'hw> {
+    inner: &'d mut Display<'hw>,
+    orientation: Orientation,
+}
+
+impl<'d, 'hw> DrawTarget for RotatedDisplay<'d, 'hw> {
+    type Color = Gray4;
+    type Error = <Display<'hw> as DrawTarget>::Error;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        const W: i32 = Display::WIDTH as i32;  // 960
+        const H: i32 = Display::HEIGHT as i32; // 540
+        let orientation = self.orientation;
+        self.inner.draw_iter(pixels.into_iter().map(|Pixel(Point { x, y }, c)| {
+            let p = match orientation {
+                Orientation::Deg0   => Point::new(x,       y      ),
+                Orientation::Deg90  => Point::new(W-1-y,   x      ),
+                Orientation::Deg180 => Point::new(W-1-x,   H-1-y  ),
+                Orientation::Deg270 => Point::new(y,       H-1-x  ),
+            };
+            Pixel(p, c)
+        }))
+    }
+}
+
+impl<'d, 'hw> OriginDimensions for RotatedDisplay<'d, 'hw> {
+    fn size(&self) -> Size {
+        if self.orientation.is_portrait() {
+            Size::new(Display::HEIGHT as u32, Display::WIDTH as u32) // 540×960
+        } else {
+            Size::new(Display::WIDTH as u32, Display::HEIGHT as u32) // 960×540
+        }
+    }
+}
+
+// ── Pages ─────────────────────────────────────────────────────────────────────
+//
+// Lines are kept to ≤52 chars so they fit in both landscape (FONT_10X20) and
+// portrait (FONT_9X18, 30 px margin → 480 px usable → 53 chars max).
+
 const PAGES: [&[&str]; 3] = [
     &[
         "Part One: The Quiet Display",
@@ -44,7 +136,7 @@ const PAGES: [&[&str]; 3] = [
         "particles from black to white and back again,",
         "one row at a time, in silent microsecond pulses.",
         "",
-        "BOOT = previous page   |   right button = next page",
+        "BOOT = back   next = forward   hold next = rotate",
     ],
     &[
         "Part Two: Memory Without Power",
@@ -64,7 +156,7 @@ const PAGES: [&[&str]; 3] = [
         "the last image indefinitely — no backlight, no",
         "refresh, no energy required to remember.",
         "",
-        "BOOT = previous page   |   right button = next page",
+        "BOOT = back   next = forward   hold next = rotate",
     ],
     &[
         "Part Three: The Cost of Patience",
@@ -83,87 +175,107 @@ const PAGES: [&[&str]; 3] = [
         "The time you just waited was the refresh time.",
         "Watch the serial monitor to see it measured.",
         "",
-        "BOOT = previous page   |   right button = next page",
+        "BOOT = back   next = forward   hold next = rotate",
     ],
 ];
 
-const MARGIN_X: i32 = 50;
-const MARGIN_Y: i32 = 40;
-const LINE_HEIGHT: i32 = 27;
+// ── Drawing ───────────────────────────────────────────────────────────────────
 
-fn draw_page(display: &mut Display, page: usize) {
-    let style = MonoTextStyle::new(&FONT_10X20, Gray4::BLACK);
+fn draw_page<D>(target: &mut D, page: usize, orientation: Orientation)
+where
+    D: DrawTarget<Color = Gray4> + OriginDimensions,
+    D::Error: core::fmt::Debug,
+{
+    let w = target.size().width as i32;
+    let h = target.size().height as i32;
 
-    // Thin border
-    Rectangle::new(Point::new(16, 16), Size::new(928, 508))
-        .into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 2))
-        .draw(display)
-        .unwrap();
+    let (font, margin_x, line_height): (&MonoFont, i32, i32) = if orientation.is_portrait() {
+        (&FONT_9X18, 30, 24)
+    } else {
+        (&FONT_10X20, 50, 27)
+    };
+
+    let style  = MonoTextStyle::new(font, Gray4::BLACK);
+    let border = PrimitiveStyle::with_stroke(Gray4::BLACK, 2);
+    let rule   = PrimitiveStyle::with_stroke(Gray4::BLACK, 1);
+
+    // Border
+    Rectangle::new(Point::new(16, 16), Size::new((w - 32) as u32, (h - 32) as u32))
+        .into_styled(border)
+        .draw(target).unwrap();
 
     // Page indicator dots at the bottom
-    let dots_y = 530i32;
-    for i in 0..3usize {
-        let cx = 460 + (i as i32 - 1) * 24;
+    let dots_y = h - 10;
+    for i in 0..PAGES.len() {
+        let cx = w / 2 + (i as i32 - 1) * 24;
         let r = 6u32;
-        if i == page {
-            Rectangle::new(
-                Point::new(cx - r as i32, dots_y - r as i32),
-                Size::new(r * 2, r * 2),
-            )
-            .into_styled(PrimitiveStyle::with_fill(Gray4::BLACK))
-            .draw(display)
-            .unwrap();
+        let dot_style = if i == page {
+            PrimitiveStyle::with_fill(Gray4::BLACK)
         } else {
-            Rectangle::new(
-                Point::new(cx - r as i32, dots_y - r as i32),
-                Size::new(r * 2, r * 2),
-            )
-            .into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 2))
-            .draw(display)
-            .unwrap();
-        }
+            PrimitiveStyle::with_stroke(Gray4::BLACK, 2)
+        };
+        Rectangle::new(
+            Point::new(cx - r as i32, dots_y - r as i32),
+            Size::new(r * 2, r * 2),
+        )
+        .into_styled(dot_style)
+        .draw(target).unwrap();
     }
 
     // Text lines
     for (i, line) in PAGES[page].iter().enumerate() {
         Text::new(
             line,
-            Point::new(MARGIN_X, MARGIN_Y + 20 + i as i32 * LINE_HEIGHT),
+            Point::new(margin_x, 60 + i as i32 * line_height),
             style,
         )
-        .draw(display)
-        .unwrap();
+        .draw(target).unwrap();
 
         // Underline separator after the title
         if i == 0 {
             Line::new(
-                Point::new(MARGIN_X, MARGIN_Y + 26 + LINE_HEIGHT),
-                Point::new(960 - MARGIN_X, MARGIN_Y + 26 + LINE_HEIGHT),
+                Point::new(margin_x, 66 + line_height),
+                Point::new(w - margin_x, 66 + line_height),
             )
-            .into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 1))
-            .draw(display)
-            .unwrap();
+            .into_styled(rule)
+            .draw(target).unwrap();
         }
     }
 }
 
-/// Returns `true` if the forward button was pressed, `false` if BOOT (back).
-fn wait_for_either_button(boot: &Input, next: &Input, delay: &Delay) -> bool {
+// ── Input ─────────────────────────────────────────────────────────────────────
+
+enum Action { PrevPage, NextPage, ToggleOrientation }
+
+// Long press threshold for the next button (in ms).
+const LONG_PRESS_MS: u32 = 500;
+
+fn wait_for_action(boot: &Input, next: &Input, delay: &Delay) -> Action {
     loop {
         if boot.is_low() {
             delay.delay_millis(50);
             while boot.is_low() {}
             delay.delay_millis(50);
-            return false;
+            return Action::PrevPage;
         }
         if next.is_low() {
             delay.delay_millis(50);
-            while next.is_low() {}
+            let mut held_ms = 50u32;
+            while next.is_low() {
+                delay.delay_millis(50);
+                held_ms += 50;
+            }
             delay.delay_millis(50);
-            return true;
+            return if held_ms >= LONG_PRESS_MS {
+                Action::ToggleOrientation
+            } else {
+                Action::NextPage
+            };
         }
     }
 }
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 #[main]
 fn main() -> ! {
@@ -179,12 +291,11 @@ fn main() -> ! {
     };
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram, psram_config);
 
-    // GPIO0 is the BOOT button — active-low with internal pull-up (back / previous)
+    // GPIO0 = BOOT button (previous page), GPIO38 = next/rotate button
     let boot_btn = Input::new(
         peripherals.GPIO0,
         InputConfig::default().with_pull(Pull::Up),
     );
-    // Forward button on GPIO38 (confirmed via find_button diagnostic)
     let next_btn = Input::new(
         peripherals.GPIO38,
         InputConfig::default().with_pull(Pull::Up),
@@ -204,33 +315,39 @@ fn main() -> ! {
     display.power_on();
     delay.delay_millis(10);
 
-    println!("Ebook demo — 3 pages. BOOT=back, right button=forward.");
+    println!("Ebook demo — BOOT=back, next=forward, hold next=cycle orientation");
 
-    // Hardware white clear once at startup
     display.clear().unwrap();
 
     let mut page = 0usize;
+    let mut orientation = Orientation::Deg0;
 
     loop {
-        // Hardware clear before every page: the waveform LUT only drives pixels
-        // toward black and leaves "white" pixels with no-drive (0x00). Without a
-        // physical clear, previously black pixels stay black regardless of what the
-        // framebuffer says. clear() unconditionally drives all rows black then white
-        // via push_pixels, returning the panel to a known white state first.
+        // Hardware clear before every page so previously-black pixels are
+        // driven back to white before the new frame is written.
         display.clear().unwrap();
 
-        draw_page(&mut display, page);
+        {
+            // RotatedDisplay is dropped at the end of this block,
+            // releasing the borrow on `display` before the flush below.
+            let mut rot = RotatedDisplay { inner: &mut display, orientation };
+            draw_page(&mut rot, page, orientation);
+        }
 
-        println!("--- page {} ---", page + 1);
-        println!("flushing...");
+        println!("page {} | {}", page + 1, orientation.label());
         display.flush(DrawMode::BlackOnWhite).unwrap();
-        println!("flush complete. BOOT=back, right button=forward.");
 
-        let forward = wait_for_either_button(&boot_btn, &next_btn, &delay);
-        if forward {
-            page = (page + 1) % PAGES.len();
-        } else {
-            page = if page == 0 { PAGES.len() - 1 } else { page - 1 };
+        match wait_for_action(&boot_btn, &next_btn, &delay) {
+            Action::PrevPage => {
+                page = if page == 0 { PAGES.len() - 1 } else { page - 1 };
+            }
+            Action::NextPage => {
+                page = (page + 1) % PAGES.len();
+            }
+            Action::ToggleOrientation => {
+                orientation = orientation.next();
+                println!("orientation: {}", orientation.label());
+            }
         }
     }
 }

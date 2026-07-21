@@ -1,13 +1,15 @@
 ## 2026-07-21 (2)
 
-**Updated: `examples/ebook.rs` — two-button navigation**
+**Updated: `examples/ebook.rs` — two-button navigation + four-way orientation**
 - BOOT (GPIO0) goes to the previous page; GPIO38 advances to the next page (confirmed on hardware).
 - Both directions wrap around (page 0 back → last page; last page forward → page 0).
-- Replaced `wait_for_button` with `wait_for_either_button` returning a bool (true=forward).
-- Updated on-screen hint on every page to show both button roles.
+- Hold GPIO38 (≥500 ms) to cycle through all four orientations: 0°, 90°, 180°, 270°.
+- `RotatedDisplay<'d, 'hw>` wrapper implements `DrawTarget` + `OriginDimensions` with per-orientation pixel mapping; two separate lifetimes keep the borrow scoped correctly.
+- `draw_page` is generic over `DrawTarget + OriginDimensions`; selects font/margins by orientation (FONT_10X20 landscape, FONT_9X18 portrait).
+- Serial monitor prints current orientation label on each change.
 
 **Added: `examples/find_button.rs` — GPIO diagnostic**
-- Polls all candidate free GPIOs (excluding USB D-/D+ on GPIO19/20 and display pins) and prints which one goes low when the forward button is pressed.
+- Polls candidate free GPIOs (excluding USB D-/D+ on GPIO19/20 and display pins) and prints which one goes low when pressed.
 - Used to identify the forward button as GPIO38. Keep for future hardware debugging.
 
 ## 2026-07-21
