@@ -1,3 +1,10 @@
+## 2026-07-21
+
+**Fix: `examples/graphics_test.rs` — panic in triangle drawing**
+- `embedded-graphics` 0.8.2 overflows `i32` in `ClosedThickSegmentIter` / `IntersectionParams::nearly_colinear_has_error` (`denominator.pow(2)`) for the triangle's large screen coordinates.
+- Workaround: replaced `Triangle::new(...).into_styled(s4)` with three separate `Line` primitives (same visual result, avoids the thick-segment join code path).
+- Removed unused `Triangle` import.
+
 ## 2026-07-20 (3)
 
 **Added: `examples/battery_status.rs` — BQ27220 + BQ25896 dashboard**

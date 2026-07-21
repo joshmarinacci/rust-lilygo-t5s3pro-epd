@@ -23,7 +23,7 @@ use embedded_graphics::{
     },
     pixelcolor::{raw::BigEndian, Gray4},
     prelude::*,
-    primitives::{Circle, Line, PrimitiveStyle, Rectangle, Triangle},
+    primitives::{Circle, Line, PrimitiveStyle, Rectangle},
     text::{Alignment, Text},
 };
 
@@ -232,14 +232,14 @@ fn draw_shapes(display: &mut Display) {
     }
 
     // ── Triangle (bottom-centre) ──────────────────────────────────────────────
-    Triangle::new(
-        Point::new(480, 310),
-        Point::new(360, 520),
-        Point::new(600, 520),
-    )
-    .into_styled(s4)
-    .draw(display)
-    .unwrap();
+    // Workaround: embedded-graphics 0.8.2 overflows i32 in ClosedThickSegmentIter
+    // for large coordinates with any stroke width. Draw as 3 separate lines instead.
+    let tri_a = Point::new(480, 310);
+    let tri_b = Point::new(360, 520);
+    let tri_c = Point::new(600, 520);
+    Line::new(tri_a, tri_b).into_styled(s4).draw(display).unwrap();
+    Line::new(tri_b, tri_c).into_styled(s4).draw(display).unwrap();
+    Line::new(tri_c, tri_a).into_styled(s4).draw(display).unwrap();
 
     // ── Grey-level horizontal lines (bottom-right) ────────────────────────────
     let grey_levels: [u8; 8] = [0, 2, 4, 6, 8, 10, 12, 14];
