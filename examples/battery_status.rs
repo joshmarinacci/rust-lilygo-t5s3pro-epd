@@ -10,7 +10,7 @@ use esp_hal::{delay::Delay, main};
 use esp_println::println;
 
 use embedded_graphics::{
-    mono_font::{ascii::{FONT_10X20, FONT_6X13}, MonoTextStyle},
+    mono_font::{ascii::{FONT_10X20, FONT_9X18}, MonoTextStyle},
     pixelcolor::Gray4,
     prelude::*,
     primitives::{Line, PrimitiveStyle, Rectangle},
@@ -135,7 +135,7 @@ fn render(display: &mut Display, fg: &FuelGauge, ch: &Charger) {
 
     let large     = MonoTextStyle::new(&FONT_10X20, Gray4::BLACK);
     let large_inv = MonoTextStyle::new(&FONT_10X20, Gray4::WHITE);
-    let small     = MonoTextStyle::new(&FONT_6X13,  Gray4::BLACK);
+    let small     = MonoTextStyle::new(&FONT_9X18,  Gray4::BLACK);
     let fill      = PrimitiveStyle::with_fill(Gray4::BLACK);
     let rule      = PrimitiveStyle::with_stroke(Gray4::BLACK, 1);
 
@@ -157,13 +157,13 @@ fn render(display: &mut Display, fg: &FuelGauge, ch: &Charger) {
 
     // ── Left: BQ27220 fuel gauge ──────────────────────────────────────────────
     let lx = PAD;
-    let mut y = 70i32;
+    let mut y = 78i32;
 
     Text::with_alignment("Fuel Gauge  (BQ27220)", Point::new(lx, y), small, Alignment::Left)
         .draw(display).unwrap();
-    y += 12;
+    y += 14;
     Line::new(Point::new(lx, y), Point::new(MID - 20, y)).into_styled(rule).draw(display).unwrap();
-    y += 26;
+    y += 28;
 
     let fg_rows: &[(&str, alloc::string::String)] = &[
         ("State of charge",  format!("{}%", fg.soc)),
@@ -182,18 +182,18 @@ fn render(display: &mut Display, fg: &FuelGauge, ch: &Charger) {
             .draw(display).unwrap();
         Text::with_alignment(value, Point::new(MID - 20, y), large, Alignment::Right)
             .draw(display).unwrap();
-        y += 32;
+        y += 36;
     }
 
     // ── Right: BQ25896 charger ────────────────────────────────────────────────
     let rx = COL2;
-    let mut y = 70i32;
+    let mut y = 78i32;
 
     Text::with_alignment("Charger  (BQ25896)", Point::new(rx, y), small, Alignment::Left)
         .draw(display).unwrap();
-    y += 12;
+    y += 14;
     Line::new(Point::new(rx, y), Point::new(W - PAD, y)).into_styled(rule).draw(display).unwrap();
-    y += 26;
+    y += 28;
 
     let ch_rows: &[(&str, alloc::string::String)] = &[
         ("USB power",        format!("{}", if ch.power_good { "Present" } else { "Not connected" })),
@@ -208,7 +208,7 @@ fn render(display: &mut Display, fg: &FuelGauge, ch: &Charger) {
             .draw(display).unwrap();
         Text::with_alignment(value, Point::new(W - PAD, y), large, Alignment::Right)
             .draw(display).unwrap();
-        y += 32;
+        y += 36;
     }
 }
 
