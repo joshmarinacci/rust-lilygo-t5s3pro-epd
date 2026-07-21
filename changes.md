@@ -1,3 +1,15 @@
+## 2026-07-21 (2)
+
+**Updated: `examples/ebook.rs` — two-button navigation**
+- BOOT (GPIO0) goes to the previous page; GPIO38 advances to the next page (confirmed on hardware).
+- Both directions wrap around (page 0 back → last page; last page forward → page 0).
+- Replaced `wait_for_button` with `wait_for_either_button` returning a bool (true=forward).
+- Updated on-screen hint on every page to show both button roles.
+
+**Added: `examples/find_button.rs` — GPIO diagnostic**
+- Polls all candidate free GPIOs (excluding USB D-/D+ on GPIO19/20 and display pins) and prints which one goes low when the forward button is pressed.
+- Used to identify the forward button as GPIO38. Keep for future hardware debugging.
+
 ## 2026-07-21
 
 **Fix: `examples/graphics_test.rs` — panic in triangle drawing**

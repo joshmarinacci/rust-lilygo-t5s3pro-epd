@@ -23,6 +23,8 @@ use epaper::driver::{Display, DrawMode};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+// Forward button is on GPIO38 (confirmed via find_button diagnostic).
+
 // Three pages of ebook content, ~65 chars per line with FONT_10X20 (10px/char)
 const PAGES: [&[&str]; 3] = [
     &[
@@ -42,7 +44,7 @@ const PAGES: [&[&str]; 3] = [
         "particles from black to white and back again,",
         "one row at a time, in silent microsecond pulses.",
         "",
-        "Press the BOOT button (GPIO 0) to turn the page.",
+        "BOOT = previous page   |   right button = next page",
     ],
     &[
         "Part Two: Memory Without Power",
@@ -62,7 +64,7 @@ const PAGES: [&[&str]; 3] = [
         "the last image indefinitely — no backlight, no",
         "refresh, no energy required to remember.",
         "",
-        "Page 2 of 3  —  press BOOT to continue.",
+        "BOOT = previous page   |   right button = next page",
     ],
     &[
         "Part Three: The Cost of Patience",
@@ -81,7 +83,7 @@ const PAGES: [&[&str]; 3] = [
         "The time you just waited was the refresh time.",
         "Watch the serial monitor to see it measured.",
         "",
-        "Page 3 of 3  —  press BOOT to return to page 1.",
+        "BOOT = previous page   |   right button = next page",
     ],
 ];
 
@@ -145,11 +147,22 @@ fn draw_page(display: &mut Display, page: usize) {
     }
 }
 
-fn wait_for_button(button: &Input, delay: &Delay) {
-    while button.is_high() {}
-    delay.delay_millis(50);
-    while button.is_low() {}
-    delay.delay_millis(50);
+/// Returns `true` if the forward button was pressed, `false` if BOOT (back).
+fn wait_for_either_button(boot: &Input, next: &Input, delay: &Delay) -> bool {
+    loop {
+        if boot.is_low() {
+            delay.delay_millis(50);
+            while boot.is_low() {}
+            delay.delay_millis(50);
+            return false;
+        }
+        if next.is_low() {
+            delay.delay_millis(50);
+            while next.is_low() {}
+            delay.delay_millis(50);
+            return true;
+        }
+    }
 }
 
 #[main]
@@ -166,9 +179,14 @@ fn main() -> ! {
     };
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram, psram_config);
 
-    // GPIO0 is the BOOT button — active-low with internal pull-up
-    let button = Input::new(
+    // GPIO0 is the BOOT button — active-low with internal pull-up (back / previous)
+    let boot_btn = Input::new(
         peripherals.GPIO0,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    // Forward button on GPIO38 (confirmed via find_button diagnostic)
+    let next_btn = Input::new(
+        peripherals.GPIO38,
         InputConfig::default().with_pull(Pull::Up),
     );
 
@@ -186,7 +204,7 @@ fn main() -> ! {
     display.power_on();
     delay.delay_millis(10);
 
-    println!("Ebook demo — 3 pages. Press BOOT (GPIO0) to advance.");
+    println!("Ebook demo — 3 pages. BOOT=back, right button=forward.");
 
     // Hardware white clear once at startup
     display.clear().unwrap();
@@ -206,10 +224,13 @@ fn main() -> ! {
         println!("--- page {} ---", page + 1);
         println!("flushing...");
         display.flush(DrawMode::BlackOnWhite).unwrap();
-        println!("flush complete. Press BOOT for next page.");
+        println!("flush complete. BOOT=back, right button=forward.");
 
-        wait_for_button(&button, &delay);
-
-        page = (page + 1) % PAGES.len();
+        let forward = wait_for_either_button(&boot_btn, &next_btn, &delay);
+        if forward {
+            page = (page + 1) % PAGES.len();
+        } else {
+            page = if page == 0 { PAGES.len() - 1 } else { page - 1 };
+        }
     }
 }
