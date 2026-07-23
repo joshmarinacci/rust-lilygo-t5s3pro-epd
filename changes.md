@@ -1,3 +1,19 @@
+## 2026-07-23
+
+**Updated: `examples/ereader_full.rs` — larger book font; header style**
+- Book text switched from `FONT_9X18` to `FONT_10X20` for improved readability; layout constants updated (landscape: 88 chars × 19 lines; portrait: 48 chars × 36 lines).
+- Header changed from white-text-on-black-fill to black-text-on-white with a 2px black border.
+
+**Added: `examples/ereader_full.rs` — full Moby Dick e-reader with status bar and deep sleep**
+- Displays the complete text of Moby Dick (1.25 MB, embedded via `include_str!`) with word-wrap pagination.
+- Header bar (black-on-white): current time (HH:MM from RTC), battery % with charging indicator (`[+]`), backlight level (tappable to cycle Off/Low/Med/High), orientation label (tappable to cycle Land/Port/Inv/CCW through four 90° rotations).
+- BOOT button (GPIO0) = previous page; GPIO38 = next page.
+- Orientation uses the `RotatedDisplay` wrapper from `ebook.rs`; text is repaginated at each rotation (landscape: ~97 chars × 21 lines; portrait: ~53 chars × 40 lines).
+- Auto deep-sleep after 60 s of inactivity: displays sleep message in footer, turns backlight off, writes page offset + backlight level + orientation to RTC STORE registers (STORE0/1/5), then calls `rtc.sleep_deep()` with `Ext0WakeupSource` on GPIO0.
+- On BOOT wakeup: restores page, backlight, and orientation from STORE registers; shows "Awake!" in footer.
+- Header time refreshes every 60 s using partial flush (only tainted rows sent to panel).
+- Added: `examples/moby_dick.txt` — Moby Dick plain text (~1.25 MB, Project Gutenberg, boilerplate stripped).
+
 ## 2026-07-21 (4)
 
 **Updated: `examples/clock.rs` — add BOOT button (GPIO0) as deep-sleep wakeup source**
