@@ -1,3 +1,26 @@
+## 2026-07-24 08:30
+
+**Added: runtime font size cycling to `ereader_full`**
+- Added `FONT_SIZES` array (3 entries: Sm=15/13px, Md=18/16px, Lg=22/20px) replacing the two compile-time constants.
+- Header expanded from 4 to 5 equal zones; the new 4th zone ("Sz:Sm/Md/Lg") cycles font size on tap.
+- Touch zone boundaries updated to fifths of canvas width: BL=[2z..3z], Sz=[3z..4z], Rot=[4z..5z].
+- Font size index stored in bits 10–11 of RTC STORE5 and restored on wakeup from deep sleep.
+- Font size change triggers a full page redraw (repagination required since line count changes).
+
+## 2026-07-24 08:10
+
+**Added: TrueType font rendering with antialiasing (`fontdue` crate + `src/font.rs`)**
+- Added `fontdue = "0.9"` dependency (pure Rust, no_std+alloc, runs on ESP32-S3 PSRAM heap).
+- New `src/font.rs` with `TextRenderer` struct: loads `fonts/Georgia.ttf` from flash via `include_bytes!`, rasterizes glyphs on demand with per-glyph caching, and alpha-blends coverage (0–255) to Gray4 (0–15) for smooth antialiased output.
+- Public API: `new()`, `draw_str(text, x, baseline_y, font_px, bg, closure)`, `measure_width()`, `line_height()`, `char_advance()`.
+- Updated `examples/ereader_full.rs` to use `TextRenderer` for body text:
+  - Removed fixed-character-count layout constants; replaced with pixel-width layout (`LAND_FONT_PX = 18.0`, `PORT_FONT_PX = 16.0`, `LEADING = 4`).
+  - `wrap_line()` replaced by `wrap_line_px()` — wraps at exact pixel widths using `renderer.char_advance()`.
+  - `paginate()` now derives `max_lines` dynamically from `renderer.line_height()`.
+  - `draw_content()` bypasses embedded-graphics for body text; applies rotation transform in the pixel write closure.
+  - Header and footer retain bitmap fonts (`FONT_9X18`, `FONT_7X13`) — unchanged.
+- Added `fonts/Georgia.ttf` (system font, not committed — place in `fonts/` before building); `fonts/*.ttf` added to `.gitignore`.
+
 ## 2026-07-23
 
 **Updated: `examples/ereader_full.rs` — larger book font; header style**

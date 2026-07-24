@@ -28,7 +28,7 @@ use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::OriginDimensions,
     mono_font::{
-        ascii::{FONT_7X13, FONT_9X18, FONT_10X20},
+        ascii::{FONT_7X13, FONT_9X18},
         MonoTextStyle,
     },
     pixelcolor::Gray4,
@@ -39,6 +39,7 @@ use embedded_graphics::{
 
 use epaper::driver::{Display, DrawMode, Gt911};
 use epaper::driver::gt911::GT911_ADDR_PRIMARY;
+use epaper::font::TextRenderer;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -65,17 +66,19 @@ const BL_LABEL: [&str; 4] = ["Off", "Low", "Med", "Hi"];
 const HEADER_H:      i32 = 44;
 const FOOTER_H:      i32 = 30;
 const CONTENT_TOP:   i32 = HEADER_H + 4;
-const LINE_H:        i32 = 24; // line spacing including leading (FONT_10X20 + 4px)
+const LEADING:       i32 = 4;    // extra spacing between lines
 
 // Landscape (canvas 960×540)
-const LAND_MARGIN:   i32   = 40;
-const LAND_CHARS:    usize = 88; // floor((960-80)/10)
-const LAND_LINES:    usize = 19; // floor((510-48)/24)
+const LAND_MARGIN:   i32 = 40;
 
 // Portrait (canvas 540×960)
-const PORT_MARGIN:   i32   = 30;
-const PORT_CHARS:    usize = 48; // floor((540-60)/10)
-const PORT_LINES:    usize = 36; // floor((930-48)/24)
+const PORT_MARGIN:   i32 = 30;
+
+// ── Font sizes ────────────────────────────────────────────────────────────────
+// Each entry is (landscape_px, portrait_px). Index 1 is the default.
+const FONT_SIZES:  [(f32, f32); 4] = [(15.0, 13.0), (18.0, 16.0), (22.0, 20.0), (28.0, 26.0)];
+const FONT_LABELS: [&str; 4]       = ["Sm", "Md", "Lg", "XL"];
+const DEFAULT_FONT_SIZE: usize     = 1;
 
 // ── Orientation ───────────────────────────────────────────────────────────────
 #[derive(Copy, Clone, PartialEq)]
@@ -182,12 +185,15 @@ fn rtc_time_str(rtc: &Rtc<'_>) -> alloc::string::String {
 }
 
 // ── Layout params for orientation ────────────────────────────────────────────
-fn layout(o: Orientation) -> (i32, i32, usize, usize, i32) {
-    // (canvas_w, canvas_h, max_chars, max_lines, margin_x)
+fn layout(o: Orientation, font_sz_idx: usize) -> (i32, i32, i32, f32, i32) {
+    // (canvas_w, canvas_h, max_px, font_px, margin_x)
+    let (land_px, port_px) = FONT_SIZES[font_sz_idx];
     if o.is_portrait() {
-        (Display::HEIGHT as i32, Display::WIDTH as i32, PORT_CHARS, PORT_LINES, PORT_MARGIN)
+        let cw = Display::HEIGHT as i32;
+        (cw, Display::WIDTH as i32, cw - PORT_MARGIN * 2, port_px, PORT_MARGIN)
     } else {
-        (Display::WIDTH as i32, Display::HEIGHT as i32, LAND_CHARS, LAND_LINES, LAND_MARGIN)
+        let cw = Display::WIDTH as i32;
+        (cw, Display::HEIGHT as i32, cw - LAND_MARGIN * 2, land_px, LAND_MARGIN)
     }
 }
 
@@ -205,25 +211,38 @@ fn phys_to_logical(tx: i32, ty: i32, o: Orientation) -> (i32, i32) {
 
 // ── Paginator ─────────────────────────────────────────────────────────────────
 // Returns (lines, next_byte_offset) — all slices reference into MOBY_DICK.
-fn paginate(start: usize, max_lines: usize, max_chars: usize) -> (Vec<&'static str>, usize) {
+fn paginate(
+    renderer: &TextRenderer,
+    start: usize,
+    content_h: i32,
+    max_px: i32,
+    font_px: f32,
+) -> (Vec<&'static str>, usize) {
+    let line_h = renderer.line_height(font_px) + LEADING;
+    let max_lines = (content_h / line_h.max(1)) as usize;
     let mut lines = Vec::with_capacity(max_lines);
     let mut pos = start;
     while lines.len() < max_lines && pos < MOBY_DICK.len() {
-        let (line, next) = wrap_line(pos, max_chars);
+        let (line, next) = wrap_line_px(renderer, pos, max_px, font_px);
         lines.push(line);
         pos = next;
     }
     (lines, pos)
 }
 
-fn wrap_line(pos: usize, max_chars: usize) -> (&'static str, usize) {
+fn wrap_line_px(
+    renderer: &TextRenderer,
+    pos: usize,
+    max_px: i32,
+    font_px: f32,
+) -> (&'static str, usize) {
     let s = &MOBY_DICK[pos..];
     let bytes = s.as_bytes();
     let n = bytes.len();
     if n == 0 { return ("", pos); }
 
     let mut last_space: Option<usize> = None;
-    let mut char_count = 0usize;
+    let mut line_px = 0.0f32;
     let mut i = 0usize;
 
     loop {
@@ -234,7 +253,8 @@ fn wrap_line(pos: usize, max_chars: usize) -> (&'static str, usize) {
         if b == b'\n' {
             return (s[..i].trim_end(), pos + i + 1);
         }
-        if char_count >= max_chars {
+        let advance = renderer.char_advance(b as char, font_px);
+        if line_px + advance > max_px as f32 {
             if let Some(sp) = last_space {
                 let line = s[..sp].trim_end();
                 let mut nxt = sp + 1;
@@ -244,13 +264,22 @@ fn wrap_line(pos: usize, max_chars: usize) -> (&'static str, usize) {
             return (&s[..i], pos + i);
         }
         if b == b' ' { last_space = Some(i); }
+        line_px += advance;
         i += 1;
-        char_count += 1;
     }
 }
 
-// ── Draw: header bar (black filled, white text) ───────────────────────────────
-fn draw_header<D>(target: &mut D, time: &str, soc: u16, charging: bool, bl: usize, o: Orientation)
+// ── Draw: header bar ──────────────────────────────────────────────────────────
+// Five equal zones; zones 3-5 are tappable.
+fn draw_header<D>(
+    target: &mut D,
+    time: &str,
+    soc: u16,
+    charging: bool,
+    bl: usize,
+    font_sz_idx: usize,
+    o: Orientation,
+)
 where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
 {
     let cw = target.size().width as i32;
@@ -260,8 +289,8 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
     Rectangle::new(Point::zero(), Size::new(cw as u32, HEADER_H as u32))
         .into_styled(border).draw(target).unwrap();
 
-    let z = cw / 4; // zone width
-    let ty = HEADER_H - 14; // text baseline (leaves 14px from bottom of bar)
+    let z = cw / 5; // zone width
+    let ty = HEADER_H - 14; // text baseline
 
     // Zone 1: time
     Text::new(time, Point::new(8, ty), black).draw(target).unwrap();
@@ -270,23 +299,44 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
     let bat = if charging { format!("{soc}%[+]") } else { format!("{soc}%") };
     Text::new(&bat, Point::new(z + 4, ty), black).draw(target).unwrap();
 
-    // Zone 3: backlight (tappable — zone x = [cw/2 .. cw*3/4])
+    // Zone 3: backlight (tappable — [2z..3z])
     let bl_s = format!("BL:{}", BL_LABEL[bl]);
     Text::new(&bl_s, Point::new(z * 2 + 4, ty), black).draw(target).unwrap();
 
-    // Zone 4: orientation (tappable — zone x = [cw*3/4 .. cw])
+    // Zone 4: font size (tappable — [3z..4z])
+    let sz_s = format!("Sz:{}", FONT_LABELS[font_sz_idx]);
+    Text::new(&sz_s, Point::new(z * 3 + 4, ty), black).draw(target).unwrap();
+
+    // Zone 5: orientation (tappable — [4z..5z])
     let rot_s = format!("Rot:{}", o.label());
-    Text::new(&rot_s, Point::new(z * 3 + 4, ty), black).draw(target).unwrap();
+    Text::new(&rot_s, Point::new(z * 4 + 4, ty), black).draw(target).unwrap();
 }
 
 // ── Draw: content text lines ──────────────────────────────────────────────────
-fn draw_content<D>(target: &mut D, lines: &[&str], margin_x: i32)
-where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
-{
-    let style = MonoTextStyle::new(&FONT_10X20, Gray4::BLACK);
+fn draw_content(
+    display: &mut Display<'_>,
+    orientation: Orientation,
+    renderer: &TextRenderer,
+    lines: &[&str],
+    margin_x: i32,
+    font_px: f32,
+) {
+    const W: i32 = Display::WIDTH as i32;
+    const H: i32 = Display::HEIGHT as i32;
+    let line_h = renderer.line_height(font_px) + LEADING;
     for (i, &line) in lines.iter().enumerate() {
-        let y = CONTENT_TOP + i as i32 * LINE_H + 16;
-        Text::new(line, Point::new(margin_x, y), style).draw(target).unwrap();
+        let baseline_y = CONTENT_TOP + renderer.line_height(font_px) + i as i32 * line_h;
+        renderer.draw_str(line, margin_x, baseline_y, font_px, 15, &mut |lx, ly, g4| {
+            let (px, py) = match orientation {
+                Orientation::Deg0   => (lx,     ly    ),
+                Orientation::Deg90  => (W-1-ly, lx    ),
+                Orientation::Deg180 => (W-1-lx, H-1-ly),
+                Orientation::Deg270 => (ly,     H-1-lx),
+            };
+            if px >= 0 && px < W && py >= 0 && py < H {
+                let _ = display.set_pixel(px as u16, py as u16, g4);
+            }
+        });
     }
 }
 
@@ -332,42 +382,52 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
 fn render_page(
     display:      &mut Display<'_>,
     rtc:          &Rtc<'_>,
+    renderer:     &TextRenderer,
     page_offset:  usize,
     orientation:  Orientation,
     bl_level:     usize,
+    font_sz_idx:  usize,
     status:       &str,
 ) -> usize
 {
     let time = rtc_time_str(rtc);
     let soc  = read_soc(display);
     let chrg = is_charging(display);
-    let (_, _, max_chars, max_lines, margin_x) = layout(orientation);
+    let (_canvas_w, canvas_h, max_px, font_px, margin_x) = layout(orientation, font_sz_idx);
+    let content_h = canvas_h - CONTENT_TOP - FOOTER_H;
 
-    let (lines, next_offset) = paginate(page_offset, max_lines, max_chars);
+    let (lines, next_offset) = paginate(renderer, page_offset, content_h, max_px, font_px);
 
-    let page_num   = page_offset / max_chars.max(1) / max_lines.max(1) + 1;
-    let total_pages = MOBY_DICK.len() / max_chars.max(1) / max_lines.max(1) + 1;
+    let line_h = (renderer.line_height(font_px) + LEADING).max(1);
+    let max_lines_est = (content_h / line_h).max(1) as usize;
+    let avg_line_chars = (max_px / 11).max(1) as usize;
+    let chars_per_page = (avg_line_chars * max_lines_est).max(1);
+    let page_num    = page_offset / chars_per_page + 1;
+    let total_pages = MOBY_DICK.len() / chars_per_page + 1;
 
-    let mut rot = RotatedDisplay { inner: display, orientation };
-    draw_header(&mut rot, &time, soc, chrg, bl_level, orientation);
-    draw_content(&mut rot, &lines, margin_x);
-    draw_footer(&mut rot, status, page_num, total_pages);
+    {
+        let mut rot = RotatedDisplay { inner: display, orientation };
+        draw_header(&mut rot, &time, soc, chrg, bl_level, font_sz_idx, orientation);
+        draw_footer(&mut rot, status, page_num, total_pages);
+    }
+    draw_content(display, orientation, renderer, &lines, margin_x, font_px);
 
     next_offset
 }
 
 // ── Partial header update (only header rows are tainted; fast flush) ──────────
 fn update_header_only(
-    display:    &mut Display<'_>,
-    rtc:        &Rtc<'_>,
-    bl_level:   usize,
+    display:     &mut Display<'_>,
+    rtc:         &Rtc<'_>,
+    bl_level:    usize,
+    font_sz_idx: usize,
     orientation: Orientation,
 ) {
     let time = rtc_time_str(rtc);
     let soc  = read_soc(display);
     let chrg = is_charging(display);
     let mut rot = RotatedDisplay { inner: display, orientation };
-    draw_header(&mut rot, &time, soc, chrg, bl_level, orientation);
+    draw_header(&mut rot, &time, soc, chrg, bl_level, font_sz_idx, orientation);
 }
 
 // ── Partial footer update ─────────────────────────────────────────────────────
@@ -400,23 +460,25 @@ fn main() -> ! {
     // ── Boot type and persisted state ─────────────────────────────────────────
     let is_first_boot = reset_reason(Cpu::ProCpu) != Some(SocResetReason::CoreDeepSleep);
 
-    let (mut page_offset, mut prev_page_offset, mut bl_level, mut orientation, wake_status) =
+    let (mut page_offset, mut prev_page_offset, mut bl_level, mut orientation,
+         mut font_sz_idx, wake_status) =
         if is_first_boot {
             rtc.set_current_time_us((INITIAL_HH * 3600 + INITIAL_MM * 60) * 1_000_000);
             println!("ereader: first boot");
-            (0usize, 0usize, 1usize, Orientation::Deg0, "")
+            (0usize, 0usize, 1usize, Orientation::Deg0, DEFAULT_FONT_SIZE, "")
         } else {
             let po    = rtc_store_read(0) as usize;
             let ppo   = rtc_store_read(1) as usize;
             let pack  = rtc_store_read(5);
             let bl    = (pack & 0xFF) as usize;
             let ori   = Orientation::from_u32(pack >> 8);
+            let sz    = ((pack >> 10) & 0x3) as usize;
             let ws    = match wakeup_cause() {
                 SleepSource::Ext0 => "Awake! BOOT=prev  next=fwd",
                 _                 => "Awake!",
             };
-            println!("ereader: woke — po={} bl={}", po, bl);
-            (po, ppo, bl.min(3), ori, ws)
+            println!("ereader: woke — po={} bl={} sz={}", po, bl, sz);
+            (po, ppo, bl.min(3), ori, sz.min(FONT_SIZES.len() - 1), ws)
         };
 
     // ── Buttons ───────────────────────────────────────────────────────────────
@@ -469,10 +531,13 @@ fn main() -> ! {
     }).unwrap();
     bl_ch.set_duty(BL_DUTY[bl_level]).unwrap();
 
+    // ── Font renderer (loads Georgia.ttf from flash into PSRAM) ──────────────
+    let renderer = TextRenderer::new();
+
     // ── Initial render ────────────────────────────────────────────────────────
     display.clear().unwrap();
     let mut next_page_offset = render_page(
-        &mut display, &rtc, page_offset, orientation, bl_level, wake_status,
+        &mut display, &rtc, &renderer, page_offset, orientation, bl_level, font_sz_idx, wake_status,
     );
     display.flush(DrawMode::BlackOnWhite).unwrap();
 
@@ -509,22 +574,28 @@ fn main() -> ! {
             }
         }
 
-        // ── Touch: backlight or orientation ───────────────────────────────────
+        // ── Touch: backlight, font size, or orientation ───────────────────────
         if let Some((tx, ty)) = display.read_touch(&mut gt911) {
             last_interaction = Instant::now();
 
             let (lx, ly) = phys_to_logical(tx as i32, ty as i32, orientation);
             let cw = if orientation.is_portrait() { 540i32 } else { 960i32 };
-            let bl_start  = cw / 2;
-            let rot_start = cw * 3 / 4;
+            let bl_start   = cw * 2 / 5;
+            let font_start = cw * 3 / 5;
+            let rot_start  = cw * 4 / 5;
 
-            if ly < HEADER_H && lx >= bl_start && lx < rot_start {
+            if ly < HEADER_H && lx >= bl_start && lx < font_start {
                 // Backlight tap → cycle level
                 bl_level = (bl_level + 1) % 4;
                 bl_ch.set_duty(BL_DUTY[bl_level]).unwrap();
                 println!("backlight: {}", BL_LABEL[bl_level]);
-                update_header_only(&mut display, &rtc, bl_level, orientation);
+                update_header_only(&mut display, &rtc, bl_level, font_sz_idx, orientation);
                 display.flush(DrawMode::BlackOnWhite).unwrap();
+            } else if ly < HEADER_H && lx >= font_start && lx < rot_start {
+                // Font size tap → cycle size, repaginate
+                font_sz_idx = (font_sz_idx + 1) % FONT_SIZES.len();
+                println!("font size: {}", FONT_LABELS[font_sz_idx]);
+                redraw = true;
             } else if ly < HEADER_H && lx >= rot_start {
                 // Orientation tap → cycle orientation, repaginate
                 orientation = orientation.next();
@@ -541,7 +612,7 @@ fn main() -> ! {
 
         // ── Time display update (every minute) ────────────────────────────────
         if last_time_update.elapsed().as_secs() >= TIME_UPDATE_SECS {
-            update_header_only(&mut display, &rtc, bl_level, orientation);
+            update_header_only(&mut display, &rtc, bl_level, font_sz_idx, orientation);
             display.flush(DrawMode::BlackOnWhite).unwrap();
             last_time_update = Instant::now();
         }
@@ -558,7 +629,7 @@ fn main() -> ! {
 
             rtc_store_write(0, page_offset as u32);
             rtc_store_write(1, prev_page_offset as u32);
-            rtc_store_write(5, bl_level as u32 | (orientation.as_u32() << 8));
+            rtc_store_write(5, bl_level as u32 | (orientation.as_u32() << 8) | ((font_sz_idx as u32) << 10));
 
             // GPIO38 is not RTC-capable on ESP32-S3 and cannot wake from deep
             // sleep. Only GPIO0 (BOOT) is used as the wakeup source.
@@ -571,7 +642,7 @@ fn main() -> ! {
         if redraw {
             display.clear().unwrap();
             next_page_offset = render_page(
-                &mut display, &rtc, page_offset, orientation, bl_level, "",
+                &mut display, &rtc, &renderer, page_offset, orientation, bl_level, font_sz_idx, "",
             );
             display.flush(DrawMode::BlackOnWhite).unwrap();
             redraw = false;

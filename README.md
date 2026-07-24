@@ -235,6 +235,60 @@ The table below lists the levers available, from lowest-impact to most aggressiv
 - For **full-page reflows** (e-reader page turn): a full `display.clear()` followed by a single `BlackOnWhite` flush is
   the cleanest approach; the clear dominates the time budget so the waveform cost is secondary.
 
+## Font Rendering
+
+The `ereader_full` example renders body text using `fontdue` — a pure-Rust TrueType rasterizer that
+runs on the ESP32-S3 PSRAM heap. The font file is embedded in flash at compile time via `include_bytes!`.
+
+### Placing the font file
+
+The font lives at `fonts/<name>.ttf` in the project root. That directory is `.gitignore`'d, so you must
+place the file there before building.
+
+To use the default Georgia (already on macOS):
+
+```
+cp /System/Library/Fonts/Supplemental/Georgia.ttf fonts/
+```
+
+Or download a freely-licensed alternative such as Noto Serif:
+
+```
+curl -L "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSerif/NotoSerif-Regular.ttf" \
+     -o fonts/NotoSerif-Regular.ttf
+```
+
+### Switching fonts
+
+Edit the one `include_bytes!` line in `src/font.rs`:
+
+```rust
+// Before
+static FONT_DATA: &[u8] = include_bytes!("../fonts/Georgia.ttf");
+
+// After (example: Noto Serif)
+static FONT_DATA: &[u8] = include_bytes!("../fonts/NotoSerif-Regular.ttf");
+```
+
+Any TTF or OTF file that `fontdue` can parse will work. The font is loaded once in `main()` after the PSRAM
+allocator is initialised; parsing takes a few milliseconds and the rasterized glyph cache lives in PSRAM.
+
+### Changing font size
+
+**At runtime:** tap the "Sz:" zone in the header (4th of 5 zones) to cycle through Sm → Md → Lg → XL.
+The selection survives deep sleep and is restored on wakeup.
+
+**Adding or adjusting sizes:** edit the two arrays near the top of `examples/ereader_full.rs`:
+
+```rust
+const FONT_SIZES:  [(f32, f32); 4] = [(15.0, 13.0), (18.0, 16.0), (22.0, 20.0), (28.0, 26.0)];
+const FONT_LABELS: [&str; 4]       = ["Sm", "Md", "Lg", "XL"];
+```
+
+Each entry is `(landscape_px, portrait_px)`. Add or remove entries freely — line count and
+word-wrap are derived automatically. The RTC register stores the index in 2 bits, so the
+array can hold up to 4 entries without any other changes.
+
 ## Key Implementation Notes
 
 - **Pixel bit ordering**: the ED047TC1 reads the parallel bus MSB-first — bits 6–7 of each output byte are the leftmost
