@@ -1,3 +1,23 @@
+## 2026-07-24 14:00
+
+**Added: header dropdown menus to `ereader_full`**
+- Replaced in-place header cycling with proper dropdown panels that open directly below the header.
+- Tapping a header zone opens a panel; tapping an option applies it and closes the panel; tapping outside dismisses without change; BOOT/Next buttons also dismiss any open dropdown before paging.
+- **Backlight dropdown** — 4 levels (Off / Low / Med / Hi); backlight updates immediately on selection.
+- **Font size dropdown** — Sm / Md / Lg / XL; repaginates on close.
+- **Rotation dropdown** — Landscape / Portrait / Inverted / CCW; repaginates on close.
+- **Battery panel** — read-only display of SoC %, charging status, voltage, current, and capacity from BQ27220/BQ25896; tap anywhere to dismiss.
+- Closing any dropdown uses a two-pass e-paper redraw (`fill(0xF)` + `flush(WhiteOnBlack)` then `render_page` + `flush(BlackOnWhite)`) to eliminate ghosting from the dropdown overlay.
+- New helpers: `dropdown_x_and_w`, `draw_option_dropdown`, `draw_battery_panel`, `restore_after_dropdown`.
+- New state: `open_dropdown: Option<Dropdown>` enum (`Backlight | Battery | FontSize | Rotation`).
+
+## 2026-07-24 08:45
+
+**Added: XL font size to `ereader_full`**
+- Expanded `FONT_SIZES` from 3 to 4 entries, adding XL at 28px landscape / 26px portrait.
+- `FONT_LABELS` updated to `["Sm", "Md", "Lg", "XL"]`.
+- RTC STORE5 bit field for font size index is 2 bits wide, so all 4 entries fit without other changes.
+
 ## 2026-07-24 08:30
 
 **Added: runtime font size cycling to `ereader_full`**

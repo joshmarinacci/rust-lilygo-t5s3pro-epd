@@ -80,11 +80,18 @@ const FONT_SIZES:  [(f32, f32); 4] = [(15.0, 13.0), (18.0, 16.0), (22.0, 20.0), 
 const FONT_LABELS: [&str; 4]       = ["Sm", "Md", "Lg", "XL"];
 const DEFAULT_FONT_SIZE: usize     = 1;
 
+// ── Dropdown panel constants ──────────────────────────────────────────────────
+const ITEM_H:     i32       = 40;  // height of each dropdown item row
+const DROP_W:     i32       = 200; // width of option dropdowns
+const BATT_W:     i32       = 320; // width of battery info panel
+const ROT_LABELS: [&str; 4] = ["Landscape", "Portrait", "Inverted", "CCW"];
+
 // ── Orientation ───────────────────────────────────────────────────────────────
 #[derive(Copy, Clone, PartialEq)]
 enum Orientation { Deg0, Deg90, Deg180, Deg270 }
 
 impl Orientation {
+    #[allow(dead_code)]
     fn next(self) -> Self {
         match self {
             Self::Deg0   => Self::Deg90,
@@ -106,6 +113,10 @@ impl Orientation {
         match v & 3 { 1 => Self::Deg90, 2 => Self::Deg180, 3 => Self::Deg270, _ => Self::Deg0 }
     }
 }
+
+// ── Dropdown state ────────────────────────────────────────────────────────────
+#[derive(Copy, Clone, PartialEq)]
+enum Dropdown { Backlight, Battery, FontSize, Rotation }
 
 // ── RotatedDisplay (mirrors ebook.rs) ────────────────────────────────────────
 struct RotatedDisplay<'d, 'hw> {
@@ -267,6 +278,82 @@ fn wrap_line_px(
         line_px += advance;
         i += 1;
     }
+}
+
+// ── Dropdown helpers ──────────────────────────────────────────────────────────
+
+fn dropdown_x_and_w(kind: Dropdown, z: i32, cw: i32) -> (i32, i32) {
+    let (x, w) = match kind {
+        Dropdown::Battery   => (z,     BATT_W),
+        Dropdown::Backlight => (z * 2, DROP_W),
+        Dropdown::FontSize  => (z * 3, DROP_W),
+        Dropdown::Rotation  => (z * 4, DROP_W),
+    };
+    (x.min(cw - w).max(0), w)
+}
+
+fn draw_option_dropdown<D>(
+    target: &mut D,
+    drop_x: i32,
+    drop_w: i32,
+    items: &[&str],
+    selected: usize,
+)
+where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
+{
+    let style = MonoTextStyle::new(&FONT_9X18, Gray4::BLACK);
+    for (i, &label) in items.iter().enumerate() {
+        let row_y = HEADER_H + i as i32 * ITEM_H;
+        let fill = if i == selected { Gray4::new(11) } else { Gray4::WHITE };
+        Rectangle::new(Point::new(drop_x, row_y), Size::new(drop_w as u32, ITEM_H as u32))
+            .into_styled(PrimitiveStyle::with_fill(fill))
+            .draw(target).unwrap();
+        Text::new(label, Point::new(drop_x + 10, row_y + ITEM_H - 12), style)
+            .draw(target).unwrap();
+    }
+    let total_h = items.len() as i32 * ITEM_H;
+    Rectangle::new(Point::new(drop_x, HEADER_H), Size::new(drop_w as u32, total_h as u32))
+        .into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 1))
+        .draw(target).unwrap();
+}
+
+fn draw_battery_panel<D>(
+    target: &mut D,
+    drop_x: i32,
+    soc: u16,
+    charging: bool,
+    voltage_mv: u16,
+    current_ma: i16,
+    remaining_mah: u16,
+    full_mah: u16,
+)
+where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
+{
+    const BATT_LINE_H: i32 = 24;
+    const BATT_LINES:  i32 = 5;
+    const PAD:         i32 = 10;
+    let panel_h = BATT_LINES * BATT_LINE_H + PAD * 2;
+    let style = MonoTextStyle::new(&FONT_9X18, Gray4::BLACK);
+    let tx = drop_x + PAD;
+
+    Rectangle::new(Point::new(drop_x, HEADER_H), Size::new(BATT_W as u32, panel_h as u32))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::WHITE))
+        .draw(target).unwrap();
+    Rectangle::new(Point::new(drop_x, HEADER_H), Size::new(BATT_W as u32, panel_h as u32))
+        .into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 1))
+        .draw(target).unwrap();
+
+    let baseline = |row: i32| HEADER_H + PAD + (row + 1) * BATT_LINE_H - 5;
+    Text::new(&format!("Battery:  {}%", soc),
+        Point::new(tx, baseline(0)), style).draw(target).unwrap();
+    Text::new(&format!("Charging: {}", if charging { "Yes" } else { "No" }),
+        Point::new(tx, baseline(1)), style).draw(target).unwrap();
+    Text::new(&format!("Voltage:  {} mV", voltage_mv),
+        Point::new(tx, baseline(2)), style).draw(target).unwrap();
+    Text::new(&format!("Current:  {} mA", current_ma),
+        Point::new(tx, baseline(3)), style).draw(target).unwrap();
+    Text::new(&format!("Capacity: {}/{} mAh", remaining_mah, full_mah),
+        Point::new(tx, baseline(4)), style).draw(target).unwrap();
 }
 
 // ── Draw: header bar ──────────────────────────────────────────────────────────
@@ -436,6 +523,23 @@ fn update_footer_only(display: &mut Display<'_>, msg: &str, orientation: Orienta
     draw_footer(&mut rot, msg, 0, 0);
 }
 
+// ── Two-pass dropdown close: WhiteOnBlack clear then full re-render ───────────
+fn restore_after_dropdown(
+    display:     &mut Display<'_>,
+    rtc:         &Rtc<'_>,
+    renderer:    &TextRenderer,
+    page_offset: usize,
+    orientation: Orientation,
+    bl_level:    usize,
+    font_sz_idx: usize,
+) -> usize {
+    display.fill(0xF).unwrap();
+    display.flush(DrawMode::WhiteOnBlack).unwrap();
+    let next = render_page(display, rtc, renderer, page_offset, orientation, bl_level, font_sz_idx, "");
+    display.flush(DrawMode::BlackOnWhite).unwrap();
+    next
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 #[main]
 fn main() -> ! {
@@ -544,29 +648,42 @@ fn main() -> ! {
     let mut last_interaction = Instant::now();
     let mut last_time_update = Instant::now();
     let mut redraw = false;
+    let mut open_dropdown: Option<Dropdown> = None;
 
     // ── Main loop ─────────────────────────────────────────────────────────────
     loop {
-        // ── BOOT = previous page ──────────────────────────────────────────────
+        // ── BOOT = previous page (or dismiss dropdown) ───────────────────────
         if boot_btn.is_low() {
             delay.delay_millis(50);
             while boot_btn.is_low() {}
             delay.delay_millis(50);
 
-            if page_offset != prev_page_offset {
+            if open_dropdown.is_some() {
+                open_dropdown = None;
+                next_page_offset = restore_after_dropdown(
+                    &mut display, &rtc, &renderer,
+                    page_offset, orientation, bl_level, font_sz_idx,
+                );
+            } else if page_offset != prev_page_offset {
                 page_offset = prev_page_offset;
                 last_interaction = Instant::now();
                 redraw = true;
             }
         }
 
-        // ── Next button = forward page ────────────────────────────────────────
+        // ── Next button = forward page (or dismiss dropdown) ─────────────────
         if next_btn.is_low() {
             delay.delay_millis(50);
             while next_btn.is_low() {}
             delay.delay_millis(50);
 
-            if next_page_offset < MOBY_DICK.len() {
+            if open_dropdown.is_some() {
+                open_dropdown = None;
+                next_page_offset = restore_after_dropdown(
+                    &mut display, &rtc, &renderer,
+                    page_offset, orientation, bl_level, font_sz_idx,
+                );
+            } else if next_page_offset < MOBY_DICK.len() {
                 prev_page_offset = page_offset;
                 page_offset = next_page_offset;
                 last_interaction = Instant::now();
@@ -574,33 +691,90 @@ fn main() -> ! {
             }
         }
 
-        // ── Touch: backlight, font size, or orientation ───────────────────────
+        // ── Touch: open/close dropdown panels ────────────────────────────────
         if let Some((tx, ty)) = display.read_touch(&mut gt911) {
             last_interaction = Instant::now();
 
             let (lx, ly) = phys_to_logical(tx as i32, ty as i32, orientation);
             let cw = if orientation.is_portrait() { 540i32 } else { 960i32 };
-            let bl_start   = cw * 2 / 5;
-            let font_start = cw * 3 / 5;
-            let rot_start  = cw * 4 / 5;
+            let z  = cw / 5;
 
-            if ly < HEADER_H && lx >= bl_start && lx < font_start {
-                // Backlight tap → cycle level
-                bl_level = (bl_level + 1) % 4;
-                bl_ch.set_duty(BL_DUTY[bl_level]).unwrap();
-                println!("backlight: {}", BL_LABEL[bl_level]);
-                update_header_only(&mut display, &rtc, bl_level, font_sz_idx, orientation);
-                display.flush(DrawMode::BlackOnWhite).unwrap();
-            } else if ly < HEADER_H && lx >= font_start && lx < rot_start {
-                // Font size tap → cycle size, repaginate
-                font_sz_idx = (font_sz_idx + 1) % FONT_SIZES.len();
-                println!("font size: {}", FONT_LABELS[font_sz_idx]);
-                redraw = true;
-            } else if ly < HEADER_H && lx >= rot_start {
-                // Orientation tap → cycle orientation, repaginate
-                orientation = orientation.next();
-                println!("orientation: {}", orientation.label());
-                redraw = true;
+            if let Some(kind) = open_dropdown {
+                // ── Dropdown open: select an item or dismiss ──────────────────
+                let (drop_x, drop_w) = dropdown_x_and_w(kind, z, cw);
+                let n_items = match kind {
+                    Dropdown::Backlight => BL_LABEL.len() as i32,
+                    Dropdown::FontSize  => FONT_SIZES.len() as i32,
+                    Dropdown::Rotation  => ROT_LABELS.len() as i32,
+                    Dropdown::Battery   => 0,
+                };
+                let in_panel = n_items > 0
+                    && lx >= drop_x && lx < drop_x + drop_w
+                    && ly >= HEADER_H && ly < HEADER_H + n_items * ITEM_H;
+
+                if in_panel {
+                    let idx = ((ly - HEADER_H) / ITEM_H) as usize;
+                    match kind {
+                        Dropdown::Backlight => {
+                            bl_level = idx;
+                            bl_ch.set_duty(BL_DUTY[bl_level]).unwrap();
+                            println!("backlight: {}", BL_LABEL[bl_level]);
+                        }
+                        Dropdown::FontSize => {
+                            font_sz_idx = idx;
+                            println!("font size: {}", FONT_LABELS[font_sz_idx]);
+                        }
+                        Dropdown::Rotation => {
+                            orientation = Orientation::from_u32(idx as u32);
+                            println!("orientation: {}", orientation.label());
+                        }
+                        Dropdown::Battery => {}
+                    }
+                }
+                open_dropdown = None;
+                next_page_offset = restore_after_dropdown(
+                    &mut display, &rtc, &renderer,
+                    page_offset, orientation, bl_level, font_sz_idx,
+                );
+
+            } else if ly < HEADER_H {
+                // ── No dropdown open: open one for the tapped zone ────────────
+                let new_kind = match lx / z {
+                    1 => Some(Dropdown::Battery),
+                    2 => Some(Dropdown::Backlight),
+                    3 => Some(Dropdown::FontSize),
+                    4 => Some(Dropdown::Rotation),
+                    _ => None,
+                };
+                if let Some(kind) = new_kind {
+                    open_dropdown = Some(kind);
+                    let (drop_x, drop_w) = dropdown_x_and_w(kind, z, cw);
+                    if kind == Dropdown::Battery {
+                        let soc     = read_soc(&mut display);
+                        let chrg    = is_charging(&mut display);
+                        let volt    = display.i2c_read_u16(BQ27220_ADDR, 0x08);
+                        let curr    = display.i2c_read_i16(BQ27220_ADDR, 0x0C);
+                        let remain  = display.i2c_read_u16(BQ27220_ADDR, 0x10);
+                        let full    = display.i2c_read_u16(BQ27220_ADDR, 0x12);
+                        let mut rot = RotatedDisplay { inner: &mut display, orientation };
+                        draw_battery_panel(&mut rot, drop_x, soc, chrg, volt, curr, remain, full);
+                    } else {
+                        let mut rot = RotatedDisplay { inner: &mut display, orientation };
+                        match kind {
+                            Dropdown::Backlight => {
+                                draw_option_dropdown(&mut rot, drop_x, drop_w, &BL_LABEL, bl_level);
+                            }
+                            Dropdown::FontSize => {
+                                draw_option_dropdown(&mut rot, drop_x, drop_w, &FONT_LABELS, font_sz_idx);
+                            }
+                            Dropdown::Rotation => {
+                                draw_option_dropdown(&mut rot, drop_x, drop_w, &ROT_LABELS, orientation.as_u32() as usize);
+                            }
+                            Dropdown::Battery => unreachable!(),
+                        }
+                    }
+                    display.flush(DrawMode::BlackOnWhite).unwrap();
+                }
             }
 
             // Wait for finger lift

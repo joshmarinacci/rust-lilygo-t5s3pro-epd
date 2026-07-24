@@ -73,6 +73,7 @@ cargo run --example <name>
 |------------------|--------------------------------------------------------------------------------------------------------------|
 | `clock`          | Deep-sleep clock; draws HH:MM:SS, sleeps 10 s or wakes on BOOT press, redraws; set `INITIAL_HH/MM/SS` before flashing |
 | `ebook`          | 3-page e-book demo; BOOT (GPIO0) = previous page, GPIO38 = next page; hold GPIO38 to cycle orientation       |
+| `ereader_full`   | Full Moby Dick reader; TrueType antialiased text; header dropdown menus for backlight, font size, rotation, and battery stats; deep sleep after 60 s of inactivity |
 | `graphics_test`  | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing                             |
 | `touch_button`   | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar                        |
 | `backlight`      | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11                                |
@@ -273,9 +274,25 @@ static FONT_DATA: &[u8] = include_bytes!("../fonts/NotoSerif-Regular.ttf");
 Any TTF or OTF file that `fontdue` can parse will work. The font is loaded once in `main()` after the PSRAM
 allocator is initialised; parsing takes a few milliseconds and the rasterized glyph cache lives in PSRAM.
 
+### Header controls
+
+The header bar is divided into 5 equal tap zones. Tapping a zone opens a dropdown panel directly below
+the header. Tap an option to apply it; tap anywhere outside the panel to dismiss without changing anything.
+BOOT and Next buttons also dismiss an open panel before paging.
+
+| Zone (left → right) | Label   | Panel contents                                      |
+|---------------------|---------|-----------------------------------------------------|
+| 1 (leftmost)        | time    | not tappable — shows HH:MM from RTC                 |
+| 2                   | battery | read-only: SoC %, charging status, voltage, current, capacity |
+| 3                   | BL:xxx  | backlight level — Off / Low / Med / Hi              |
+| 4                   | Sz:xxx  | font size — Sm / Md / Lg / XL                       |
+| 5 (rightmost)       | Rot:xxx | orientation — Landscape / Portrait / Inverted / CCW |
+
+All selections survive deep sleep (stored in RTC STORE5).
+
 ### Changing font size
 
-**At runtime:** tap the "Sz:" zone in the header (4th of 5 zones) to cycle through Sm → Md → Lg → XL.
+**At runtime:** tap the "Sz:" zone (zone 4) to open the font size dropdown, then select Sm / Md / Lg / XL.
 The selection survives deep sleep and is restored on wakeup.
 
 **Adding or adjusting sizes:** edit the two arrays near the top of `examples/ereader_full.rs`:
