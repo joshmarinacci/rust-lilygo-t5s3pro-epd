@@ -79,6 +79,7 @@ cargo run --example <name>
 | `backlight`      | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11                                |
 | `finger_draw`    | Touch drawing demo; paint 16×16 px dots wherever your finger moves; partial-refresh timing printed to serial |
 | `battery_status` | Dashboard showing live readings from the BQ27220 fuel gauge and BQ25896 charger; refreshes every 10 s        |
+| `flash_demo`     | Minimal demo: detects hardware reset reason (power-on / deep-sleep / software-reset / WDT), loads a persistent boot counter from NVS flash (sequential-storage map), increments and saves it; shows `None` on first-ever flash use and `Some(n)` on subsequent boots |
 
 **Example:**
 

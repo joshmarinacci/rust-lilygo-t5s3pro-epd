@@ -1,3 +1,11 @@
+## 2026-07-25 (2)
+
+**Added: `flash_demo` example**
+- Standalone example demonstrating how to detect boot type and use sequential-storage for persistent NVS flash reads/writes without any display or PSRAM dependency.
+- Shows `reset_reason` variants (power-on, deep-sleep wakeup, software reset, watchdog, brownout).
+- `fetch_item` returning `None` vs `Some(n)` is used to distinguish first-ever flash use from subsequent boots.
+- Maintains a boot counter (key 42) and a payload value (key 43) — different keys from `ereader_full` (key 0) so both examples can coexist in the same NVS partition.
+
 ## 2026-07-25
 
 **Added: persistent reading position across full power cycles (`ereader_full`)**
