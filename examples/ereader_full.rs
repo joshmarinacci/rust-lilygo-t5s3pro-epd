@@ -40,6 +40,8 @@ use embedded_graphics::{
 use epaper::driver::{Display, DrawMode, Gt911};
 use epaper::driver::gt911::GT911_ADDR_PRIMARY;
 use epaper::font::TextRenderer;
+use esp_storage::FlashStorage;
+use sequential_storage::{cache::NoCache, map};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -523,6 +525,98 @@ fn update_footer_only(display: &mut Display<'_>, msg: &str, orientation: Orienta
     draw_footer(&mut rot, msg, 0, 0);
 }
 
+// ── Flash adapter: wraps blocking FlashStorage for sequential-storage's async API ─
+struct FlashAdapter(FlashStorage);
+
+impl embedded_storage::nor_flash::ErrorType for FlashAdapter {
+    type Error = esp_storage::FlashStorageError;
+}
+
+impl embedded_storage_async::nor_flash::ReadNorFlash for FlashAdapter {
+    const READ_SIZE: usize = FlashStorage::WORD_SIZE as usize;
+
+    async fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        embedded_storage::nor_flash::ReadNorFlash::read(&mut self.0, offset, bytes)
+    }
+
+    fn capacity(&self) -> usize {
+        embedded_storage::nor_flash::ReadNorFlash::capacity(&self.0)
+    }
+}
+
+impl embedded_storage_async::nor_flash::NorFlash for FlashAdapter {
+    const WRITE_SIZE: usize = FlashStorage::WORD_SIZE as usize;
+    const ERASE_SIZE: usize = FlashStorage::SECTOR_SIZE as usize;
+
+    async fn erase(&mut self, from: u32, to: u32) -> Result<(), Self::Error> {
+        embedded_storage::nor_flash::NorFlash::erase(&mut self.0, from, to)
+    }
+
+    async fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), Self::Error> {
+        embedded_storage::nor_flash::NorFlash::write(&mut self.0, offset, bytes)
+    }
+}
+
+// ── Minimal no_std executor ────────────────────────────────────────────────────
+// Sequential-storage futures over blocking flash are always Poll::Ready on the
+// first poll, so a noop-waker spin loop is safe here.
+fn block_on<F: core::future::Future>(mut f: F) -> F::Output {
+    use core::{
+        pin::Pin,
+        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    };
+    static VTABLE: RawWakerVTable =
+        RawWakerVTable::new(|p| RawWaker::new(p, &VTABLE), |_| {}, |_| {}, |_| {});
+    let waker = unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) };
+    let mut cx = Context::from_waker(&waker);
+    loop {
+        match unsafe { Pin::new_unchecked(&mut f) }.poll(&mut cx) {
+            Poll::Ready(v) => return v,
+            Poll::Pending => {}
+        }
+    }
+}
+
+// ── Persistent reading position (survives full power cycle) ───────────────────
+const NVS_FLASH_RANGE: core::ops::Range<u32> = 0x9000..0xF000;
+const POSITION_KEY: u8 = 0;
+
+fn flash_load_position() -> usize {
+    let mut flash = FlashAdapter(FlashStorage::new());
+    let mut cache = NoCache::new();
+    let mut buf = [0u8; 64];
+    match block_on(map::fetch_item::<u8, u32, _>(
+        &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &POSITION_KEY,
+    )) {
+        Ok(Some(pos)) => {
+            let pos = pos as usize;
+            if pos < MOBY_DICK.len() {
+                println!("flash: resuming from byte {}", pos);
+                pos
+            } else {
+                println!("flash: saved offset {} out of bounds, starting at 0", pos);
+                0
+            }
+        }
+        Ok(None) => 0,
+        Err(e) => {
+            println!("flash: load error {:?}, starting at 0", e);
+            0
+        }
+    }
+}
+
+fn flash_save_position(pos: usize) {
+    let mut flash = FlashAdapter(FlashStorage::new());
+    let mut cache = NoCache::new();
+    let mut buf = [0u8; 64];
+    if let Err(e) = block_on(map::store_item::<u8, u32, _>(
+        &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &POSITION_KEY, &(pos as u32),
+    )) {
+        println!("flash: save error {:?}", e);
+    }
+}
+
 // ── Two-pass dropdown close: WhiteOnBlack clear then full re-render ───────────
 fn restore_after_dropdown(
     display:     &mut Display<'_>,
@@ -568,8 +662,10 @@ fn main() -> ! {
          mut font_sz_idx, wake_status) =
         if is_first_boot {
             rtc.set_current_time_us((INITIAL_HH * 3600 + INITIAL_MM * 60) * 1_000_000);
-            println!("ereader: first boot");
-            (0usize, 0usize, 1usize, Orientation::Deg0, DEFAULT_FONT_SIZE, "")
+            let saved = flash_load_position();
+            let ws = if saved > 0 { "Resumed" } else { "" };
+            println!("ereader: first boot, offset={}", saved);
+            (saved, saved, 1usize, Orientation::Deg0, DEFAULT_FONT_SIZE, ws)
         } else {
             let po    = rtc_store_read(0) as usize;
             let ppo   = rtc_store_read(1) as usize;
@@ -666,6 +762,7 @@ fn main() -> ! {
                 );
             } else if page_offset != prev_page_offset {
                 page_offset = prev_page_offset;
+                flash_save_position(page_offset);
                 last_interaction = Instant::now();
                 redraw = true;
             }
@@ -686,6 +783,7 @@ fn main() -> ! {
             } else if next_page_offset < MOBY_DICK.len() {
                 prev_page_offset = page_offset;
                 page_offset = next_page_offset;
+                flash_save_position(page_offset);
                 last_interaction = Instant::now();
                 redraw = true;
             }

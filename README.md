@@ -73,7 +73,7 @@ cargo run --example <name>
 |------------------|--------------------------------------------------------------------------------------------------------------|
 | `clock`          | Deep-sleep clock; draws HH:MM:SS, sleeps 10 s or wakes on BOOT press, redraws; set `INITIAL_HH/MM/SS` before flashing |
 | `ebook`          | 3-page e-book demo; BOOT (GPIO0) = previous page, GPIO38 = next page; hold GPIO38 to cycle orientation       |
-| `ereader_full`   | Full Moby Dick reader; TrueType antialiased text; header dropdown menus for backlight, font size, rotation, and battery stats; deep sleep after 60 s of inactivity |
+| `ereader_full`   | Full Moby Dick reader; TrueType antialiased text; header dropdown menus for backlight, font size, rotation, and battery stats; deep sleep after 60 s of inactivity; reading position persists across full power cycles via NVS flash |
 | `graphics_test`  | 7-screen graphics test: shapes, typography, grayscale, images, animation, timing                             |
 | `touch_button`   | Capacitive touch demo; tap the button to toggle fill, coordinates shown in status bar                        |
 | `backlight`      | Frontlight demo; fades the LED frontlight in and out using LEDC PWM on GPIO11                                |
@@ -289,6 +289,17 @@ BOOT and Next buttons also dismiss an open panel before paging.
 | 5 (rightmost)       | Rot:xxx | orientation — Landscape / Portrait / Inverted / CCW |
 
 All selections survive deep sleep (stored in RTC STORE5).
+
+### Persistent reading position
+
+The current reading position (byte offset into the text) survives full power-off and reflash via the NVS flash partition. On the next boot the reader reopens to the same page and briefly shows "Resumed" in the footer status bar.
+
+| State                | Persistence mechanism                       |
+|----------------------|---------------------------------------------|
+| Reading position     | NVS flash (`0x9000..0xF000`, sequential-storage map) |
+| Backlight / font / orientation | RTC STORE registers (deep sleep only) |
+
+The NVS partition is declared in `partitions.csv`. Position is saved on every page turn; a failed flash write is logged and silently ignored — position is still correct in RAM for the current session.
 
 ### Changing font size
 

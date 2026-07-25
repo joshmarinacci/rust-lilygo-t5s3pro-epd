@@ -1,3 +1,13 @@
+## 2026-07-25
+
+**Added: persistent reading position across full power cycles (`ereader_full`)**
+- Reading position (`page_offset` byte offset) is now saved to flash on every page turn (forward and back) and loaded on startup, surviving full power-off/reflash cycles.
+- Uses `sequential-storage 3.0` map API with a 6-sector NVS partition (`0x9000..0xF000`, matching `partitions.csv`), keyed by `u8` key `0` with `u32` value.
+- Thin `FlashAdapter` wrapper bridges `esp-storage`'s synchronous `NorFlash` impl to the async `embedded_storage_async` trait required by `sequential-storage 3.0`, run via a minimal noop-waker `block_on` (safe because flash ops never yield).
+- On full power-on: loads saved position from flash; shows "Resumed" in the status bar if non-zero. Deep-sleep wakeup continues to restore from RTC STORE registers (unchanged).
+- Flash errors on load fall back to position 0 and are logged; flash errors on save are logged and ignored (position is still correct in RAM).
+- Added `nor-flash` feature to `esp-storage` and `embedded-storage-async = "0.4"` as a direct dependency.
+
 ## 2026-07-24 14:00
 
 **Added: header dropdown menus to `ereader_full`**
