@@ -1,3 +1,14 @@
+## 2026-07-26 (5)
+
+**Fast-scroll: hold BOOT/next button for 1 second to jump many pages**
+- Holding either navigation button for ≥1 second enters fast-scroll mode: a centered dialog appears and the page counter advances as fast as the EPD can refresh while the button is held.
+- On release the display does a full clear+render at the new page offset. Single short-press behaviour is unchanged.
+- Clamps at chapter start/end (no cross-chapter jumps during fast-scroll).
+- New helpers: `compute_chars_per_page`, `draw_fast_scroll_dialog`, `advance_page_offset`, `fast_scroll`.
+- Dialog uses the proven two-flush pattern (WhiteOnBlack to clear EPD rows, then BlackOnWhite to render) so previous page text doesn't bleed through.
+- Dialog is drawn through `RotatedDisplay` so it matches the current reading orientation.
+- In portrait mode (Deg90/270) the dialog uses 70px logical-X × 300px logical-Y (swapped from landscape's 300×70) so the logical-X-to-physical-row mapping always taints only ~70 rows in all orientations — same flush cost as landscape.
+
 ## 2026-07-26 (4)
 
 **Fixed dropdown background bleed-through (full-screen clear + re-render on open)**

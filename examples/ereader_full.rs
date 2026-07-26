@@ -673,6 +673,129 @@ fn restore_after_dropdown(
     next
 }
 
+// ── Fast-scroll helpers ───────────────────────────────────────────────────────
+
+fn compute_chars_per_page(renderer: &TextRenderer, orientation: Orientation, font_sz_idx: usize) -> usize {
+    let (_, canvas_h, max_px, font_px, _) = layout(orientation, font_sz_idx);
+    let content_h = canvas_h - CONTENT_TOP - FOOTER_H;
+    let line_h = renderer.line_height(font_px) + LEADING;
+    let avg_char_px = (font_px * 0.55) as usize;
+    let line_chars = (max_px as usize / avg_char_px.max(1)).max(1);
+    let lines_per_page = (content_h / line_h.max(1)) as usize;
+    (line_chars * lines_per_page).max(1)
+}
+
+fn draw_fast_scroll_dialog<D>(target: &mut D, page_num: usize, total_pages: usize)
+where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
+{
+    let cw = target.size().width as i32;
+    let ch = target.size().height as i32;
+    // In portrait (ch > cw, canvas 540×960 logical), logical-X maps to physical rows via the
+    // Deg90/Deg270 transform. Swap to a narrow logical-X dialog so both orientations taint
+    // exactly the same ~70 physical rows and flush at the same speed.
+    let is_portrait = ch > cw;
+    let (dlg_w, dlg_h): (u32, u32) = if is_portrait { (70, 300) } else { (300, 70) };
+    let dlg_x = (cw - dlg_w as i32) / 2;
+    let dlg_y = (ch - dlg_h as i32) / 2;
+    let rect = Rectangle::new(Point::new(dlg_x, dlg_y), Size::new(dlg_w, dlg_h));
+    rect.into_styled(PrimitiveStyle::with_fill(Gray4::WHITE)).draw(target).unwrap();
+    rect.into_styled(PrimitiveStyle::with_stroke(Gray4::BLACK, 2)).draw(target).unwrap();
+    // Portrait: abbreviated label fits the narrow 70px logical-X dimension.
+    // Landscape: full label fits the wide 300px logical-X dimension.
+    if is_portrait {
+        let label = format!("{}/{}", page_num, total_pages);
+        Text::with_alignment(
+            &label,
+            Point::new(dlg_x + dlg_w as i32 / 2, dlg_y + dlg_h as i32 / 2 + 4),
+            MonoTextStyle::new(&FONT_7X13, Gray4::BLACK),
+            Alignment::Center,
+        ).draw(target).unwrap();
+    } else {
+        let label = format!("p. {} / {}", page_num, total_pages);
+        Text::with_alignment(
+            &label,
+            Point::new(dlg_x + dlg_w as i32 / 2, dlg_y + dlg_h as i32 / 2 + 9),
+            MonoTextStyle::new(&FONT_10X20, Gray4::BLACK),
+            Alignment::Center,
+        ).draw(target).unwrap();
+    }
+}
+
+// Advances exactly one page forward from `start` without allocating a Vec.
+fn advance_page_offset(
+    renderer: &TextRenderer,
+    text: &str,
+    start: usize,
+    content_h: i32,
+    max_px: i32,
+    font_px: f32,
+) -> usize {
+    let line_h = renderer.line_height(font_px) + LEADING;
+    let max_lines = (content_h / line_h.max(1)) as usize;
+    let mut pos = start;
+    for _ in 0..max_lines {
+        if pos >= text.len() { break; }
+        let (_, next) = wrap_line_px(renderer, text, pos, max_px, font_px);
+        if next == pos { break; }
+        pos = next;
+    }
+    pos
+}
+
+// Held-button fast-scroll: shows a centered page-number dialog, advancing one page
+// per EPD refresh cycle. Returns the new page_offset (unchanged if already at boundary).
+fn fast_scroll(
+    forward: bool,
+    display: &mut Display<'_>,
+    renderer: &TextRenderer,
+    chapter_text: &str,
+    start_offset: usize,
+    orientation: Orientation,
+    font_sz_idx: usize,
+    is_held: &mut dyn FnMut() -> bool,
+) -> usize {
+    let (_, canvas_h, max_px, font_px, _) = layout(orientation, font_sz_idx);
+    let content_h = canvas_h - CONTENT_TOP - FOOTER_H;
+    let chars_per_page = compute_chars_per_page(renderer, orientation, font_sz_idx);
+    let total_pages = (chapter_text.len() / chars_per_page + 1).max(1);
+    let mut scroll_offset = start_offset;
+
+    // Two-flush pattern: WhiteOnBlack clears the dialog rows on the EPD panel,
+    // then BlackOnWhite renders the dialog content. Draw through RotatedDisplay
+    // so the dialog is centered and oriented to match the current reading layout.
+    let pn = scroll_offset / chars_per_page + 1;
+    { let mut rot = RotatedDisplay { inner: display, orientation };
+      draw_fast_scroll_dialog(&mut rot, pn, total_pages); }
+    display.flush(DrawMode::WhiteOnBlack).unwrap();
+    { let mut rot = RotatedDisplay { inner: display, orientation };
+      draw_fast_scroll_dialog(&mut rot, pn, total_pages); }
+    display.flush(DrawMode::BlackOnWhite).unwrap();
+
+    // Advance as fast as the EPD can redraw — no artificial delay.
+    loop {
+        if !is_held() { break; }
+        let new_offset = if forward {
+            let next = advance_page_offset(renderer, chapter_text, scroll_offset,
+                                           content_h, max_px, font_px);
+            if next > scroll_offset { next } else { scroll_offset }
+        } else {
+            scroll_offset.saturating_sub(chars_per_page)
+        };
+        scroll_offset = new_offset;
+
+        let pn = scroll_offset / chars_per_page + 1;
+        { let mut rot = RotatedDisplay { inner: display, orientation };
+          draw_fast_scroll_dialog(&mut rot, pn, total_pages); }
+        display.flush(DrawMode::WhiteOnBlack).unwrap();
+        if !is_held() { break; }
+        { let mut rot = RotatedDisplay { inner: display, orientation };
+          draw_fast_scroll_dialog(&mut rot, pn, total_pages); }
+        display.flush(DrawMode::BlackOnWhite).unwrap();
+    }
+
+    scroll_offset
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 #[main]
 fn main() -> ! {
@@ -806,73 +929,120 @@ fn main() -> ! {
         // ── BOOT = previous page (or dismiss dropdown) ───────────────────────
         if boot_btn.is_low() {
             delay.delay_millis(50);
-            while boot_btn.is_low() {}
-            delay.delay_millis(50);
 
             if open_dropdown.is_some() {
+                while boot_btn.is_low() { delay.delay_millis(10); }
+                delay.delay_millis(50);
                 open_dropdown = None;
                 next_page_offset = restore_after_dropdown(
                     &mut display, &rtc, &renderer, &chapter_text,
                     chapter_idx, chapter_count, page_offset, orientation, bl_level, font_sz_idx,
                 );
-            } else if page_offset != prev_page_offset {
-                // Go back within the current chapter.
-                page_offset = prev_page_offset;
-                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
-                last_interaction = Instant::now();
-                redraw = true;
-            } else if chapter_idx > 0 {
-                // At the start of a chapter — go to start of previous non-empty chapter.
-                chapter_idx -= 1;
-                chapter_text = archive.chapter_text(&spine[chapter_idx])
-                    .expect("epub: chapter load");
-                while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx > 0 {
-                    chapter_idx -= 1;
-                    chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+            } else {
+                let hold_start = Instant::now();
+                while boot_btn.is_low() && hold_start.elapsed().as_millis() < 1000 {
+                    delay.delay_millis(10);
                 }
-                page_offset = 0;
-                prev_page_offset = 0;
-                next_page_offset = 0;
-                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
-                last_interaction = Instant::now();
-                redraw = true;
+                if boot_btn.is_low() {
+                    // Long press: fast-scroll backward.
+                    let new_off = fast_scroll(
+                        false, &mut display, &renderer, &chapter_text,
+                        page_offset, orientation, font_sz_idx,
+                        &mut || boot_btn.is_low(),
+                    );
+                    while boot_btn.is_low() { delay.delay_millis(10); }
+                    if new_off != page_offset {
+                        prev_page_offset = page_offset;
+                        page_offset = new_off;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    }
+                } else {
+                    // Short press: go back one page or to previous chapter.
+                    if page_offset != prev_page_offset {
+                        page_offset = prev_page_offset;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    } else if chapter_idx > 0 {
+                        chapter_idx -= 1;
+                        chapter_text = archive.chapter_text(&spine[chapter_idx])
+                            .expect("epub: chapter load");
+                        while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx > 0 {
+                            chapter_idx -= 1;
+                            chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+                        }
+                        page_offset = 0;
+                        prev_page_offset = 0;
+                        next_page_offset = 0;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    }
+                }
+                delay.delay_millis(50);
             }
         }
 
         // ── Next button = forward page (or dismiss dropdown) ─────────────────
         if next_btn.is_low() {
             delay.delay_millis(50);
-            while next_btn.is_low() {}
-            delay.delay_millis(50);
 
             if open_dropdown.is_some() {
+                while next_btn.is_low() { delay.delay_millis(10); }
+                delay.delay_millis(50);
                 open_dropdown = None;
                 next_page_offset = restore_after_dropdown(
                     &mut display, &rtc, &renderer, &chapter_text,
                     chapter_idx, chapter_count, page_offset, orientation, bl_level, font_sz_idx,
                 );
-            } else if next_page_offset < chapter_text.len() {
-                // Next page within current chapter.
-                prev_page_offset = page_offset;
-                page_offset = next_page_offset;
-                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
-                last_interaction = Instant::now();
-                redraw = true;
-            } else if chapter_idx + 1 < chapter_count {
-                // End of chapter — advance to next non-empty chapter.
-                chapter_idx += 1;
-                chapter_text = archive.chapter_text(&spine[chapter_idx])
-                    .expect("epub: chapter load");
-                while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx + 1 < chapter_count {
-                    chapter_idx += 1;
-                    chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+            } else {
+                let hold_start = Instant::now();
+                while next_btn.is_low() && hold_start.elapsed().as_millis() < 1000 {
+                    delay.delay_millis(10);
                 }
-                page_offset = 0;
-                prev_page_offset = 0;
-                next_page_offset = 0;
-                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
-                last_interaction = Instant::now();
-                redraw = true;
+                if next_btn.is_low() {
+                    // Long press: fast-scroll forward.
+                    let new_off = fast_scroll(
+                        true, &mut display, &renderer, &chapter_text,
+                        page_offset, orientation, font_sz_idx,
+                        &mut || next_btn.is_low(),
+                    );
+                    while next_btn.is_low() { delay.delay_millis(10); }
+                    if new_off != page_offset {
+                        prev_page_offset = page_offset;
+                        page_offset = new_off;
+                        next_page_offset = new_off;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    }
+                } else {
+                    // Short press: advance one page or to next chapter.
+                    if next_page_offset < chapter_text.len() {
+                        prev_page_offset = page_offset;
+                        page_offset = next_page_offset;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    } else if chapter_idx + 1 < chapter_count {
+                        chapter_idx += 1;
+                        chapter_text = archive.chapter_text(&spine[chapter_idx])
+                            .expect("epub: chapter load");
+                        while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx + 1 < chapter_count {
+                            chapter_idx += 1;
+                            chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+                        }
+                        page_offset = 0;
+                        prev_page_offset = 0;
+                        next_page_offset = 0;
+                        flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                        last_interaction = Instant::now();
+                        redraw = true;
+                    }
+                }
+                delay.delay_millis(50);
             }
         }
 
