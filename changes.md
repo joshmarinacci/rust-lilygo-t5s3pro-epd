@@ -1,3 +1,10 @@
+## 2026-07-26 (3)
+
+**UI fixes: header font, dropdown background, footer page count**
+- Header buttons now use `FONT_10X20` (up from `FONT_9X18`) with `HEADER_H` increased to 52 px for comfortable fit.
+- Option dropdowns (`draw_option_dropdown`) now fill the full panel area with white before drawing rows, preventing page text from bleeding through.
+- Footer now shows `Ch.N/M p.P/T` — chapter number, chapter count, estimated page within chapter, and estimated total pages in chapter — instead of just the chapter number.
+
 ## 2026-07-26 (2)
 
 **Fixed blank first page and added full settings persistence (`ereader_full`)**

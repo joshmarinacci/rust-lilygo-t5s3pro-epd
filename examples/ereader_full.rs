@@ -28,7 +28,7 @@ use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::OriginDimensions,
     mono_font::{
-        ascii::{FONT_7X13, FONT_9X18},
+        ascii::{FONT_7X13, FONT_9X18, FONT_10X20},
         MonoTextStyle,
     },
     pixelcolor::Gray4,
@@ -70,7 +70,7 @@ const BL_LABEL: [&str; 4] = ["Off", "Low", "Med", "Hi"];
 const MIN_CHAPTER_CHARS: usize = 50;
 
 // ── Layout constants (physical display is always 960×540) ─────────────────────
-const HEADER_H:      i32 = 44;
+const HEADER_H:      i32 = 52;
 const FOOTER_H:      i32 = 30;
 const CONTENT_TOP:   i32 = HEADER_H + 4;
 const LEADING:       i32 = 4;    // extra spacing between lines
@@ -315,6 +315,11 @@ fn draw_option_dropdown<D>(
 where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
 {
     let style = MonoTextStyle::new(&FONT_9X18, Gray4::BLACK);
+    // Clear the full dropdown area before drawing so page text doesn't bleed through.
+    let total_h = items.len() as i32 * ITEM_H;
+    Rectangle::new(Point::new(drop_x, HEADER_H), Size::new(drop_w as u32, total_h as u32))
+        .into_styled(PrimitiveStyle::with_fill(Gray4::WHITE))
+        .draw(target).unwrap();
     for (i, &label) in items.iter().enumerate() {
         let row_y = HEADER_H + i as i32 * ITEM_H;
         let fill = if i == selected { Gray4::new(11) } else { Gray4::WHITE };
@@ -383,13 +388,13 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
 {
     let cw = target.size().width as i32;
     let border = PrimitiveStyle::with_stroke(Gray4::BLACK, 2);
-    let black  = MonoTextStyle::new(&FONT_9X18, Gray4::BLACK);
+    let black  = MonoTextStyle::new(&FONT_10X20, Gray4::BLACK);
 
     Rectangle::new(Point::zero(), Size::new(cw as u32, HEADER_H as u32))
         .into_styled(border).draw(target).unwrap();
 
     let z = cw / 5; // zone width
-    let ty = HEADER_H - 14; // text baseline
+    let ty = HEADER_H - 16; // text baseline
 
     Text::new(time, Point::new(8, ty), black).draw(target).unwrap();
 
@@ -435,7 +440,14 @@ fn draw_content(
 }
 
 // ── Draw: footer bar ──────────────────────────────────────────────────────────
-fn draw_footer<D>(target: &mut D, status: &str, chapter: usize, chapter_count: usize)
+fn draw_footer<D>(
+    target: &mut D,
+    status: &str,
+    chapter: usize,
+    chapter_count: usize,
+    page: usize,
+    total_pages: usize,
+)
 where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
 {
     let cw = target.size().width  as i32;
@@ -460,7 +472,7 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
             .draw(target).unwrap();
     } else {
         if chapter_count > 0 {
-            let s = format!("Ch.{}/{}", chapter + 1, chapter_count);
+            let s = format!("Ch.{}/{} p.{}/{}", chapter + 1, chapter_count, page, total_pages);
             Text::new(&s, Point::new(8, ty), small).draw(target).unwrap();
         }
         Text::with_alignment(
@@ -491,12 +503,21 @@ fn render_page(
     let (_canvas_w, canvas_h, max_px, font_px, margin_x) = layout(orientation, font_sz_idx);
     let content_h = canvas_h - CONTENT_TOP - FOOTER_H;
 
+    let line_h = renderer.line_height(font_px) + LEADING;
     let (lines, next_offset) = paginate(renderer, chapter_text, page_offset, content_h, max_px, font_px);
+
+    // Rough page-within-chapter estimate from byte offset.
+    let avg_char_px = (font_px * 0.55) as usize;
+    let line_chars  = (max_px as usize / avg_char_px.max(1)).max(1);
+    let lines_per_page = (content_h / line_h.max(1)) as usize;
+    let chars_per_page = (line_chars * lines_per_page).max(1);
+    let page_num    = page_offset / chars_per_page + 1;
+    let total_pages = (chapter_text.len() / chars_per_page + 1).max(page_num);
 
     {
         let mut rot = RotatedDisplay { inner: display, orientation };
         draw_header(&mut rot, &time, soc, chrg, bl_level, font_sz_idx, orientation);
-        draw_footer(&mut rot, status, chapter_idx, chapter_count);
+        draw_footer(&mut rot, status, chapter_idx, chapter_count, page_num, total_pages);
     }
     draw_content(display, orientation, renderer, &lines, margin_x, font_px);
 
@@ -521,7 +542,7 @@ fn update_header_only(
 // ── Partial footer update ─────────────────────────────────────────────────────
 fn update_footer_only(display: &mut Display<'_>, msg: &str, orientation: Orientation) {
     let mut rot = RotatedDisplay { inner: display, orientation };
-    draw_footer(&mut rot, msg, 0, 0);
+    draw_footer(&mut rot, msg, 0, 0, 0, 0);
 }
 
 // ── Flash adapter: wraps blocking FlashStorage for sequential-storage's async API ─
