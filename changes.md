@@ -1,3 +1,10 @@
+## 2026-07-26 (4)
+
+**Fixed dropdown background bleed-through (full-screen clear + re-render on open)**
+- Dropdown opening now uses the same pattern as `restore_after_dropdown`: `fill(white)` + `flush(WhiteOnBlack)` to clear the entire screen, then `render_page` to redraw the current page, then draw the dropdown overlay, then `flush(BlackOnWhite)`.
+- Previous attempts with `clear_area` (physical rect) caused two problems: (1) `push_pixels` column addressing uses a different byte reorder than the framebuffer path, so the clear was shifted relative to the drawn content, leaving bleed-through at one edge; (2) the expanded margin calculation allowed `area.x + area.width > 960`, causing an index-out-of-bounds panic for the Rotation dropdown in landscape mode.
+- The full-screen clear approach is simpler and provably correct in all orientations — the same logic that works for closing dropdowns now also works for opening them.
+
 ## 2026-07-26 (3)
 
 **UI fixes: header font, dropdown background, footer page count**

@@ -933,6 +933,17 @@ fn main() -> ! {
                 if let Some(kind) = new_kind {
                     open_dropdown = Some(kind);
                     let (drop_x, drop_w) = dropdown_x_and_w(kind, z, cw);
+
+                    // Clear the full screen to white, re-render the page behind the dropdown,
+                    // then draw the dropdown on top — same pattern as restore_after_dropdown.
+                    // This guarantees no bleed-through in any orientation without needing to
+                    // compute orientation-specific physical rects for a partial clear.
+                    display.fill(0xF).unwrap();
+                    display.flush(DrawMode::WhiteOnBlack).unwrap();
+                    render_page(&mut display, &rtc, &renderer, &chapter_text,
+                                chapter_idx, chapter_count, page_offset,
+                                orientation, bl_level, font_sz_idx, "");
+
                     if kind == Dropdown::Battery {
                         let soc    = read_soc(&mut display);
                         let chrg   = is_charging(&mut display);
