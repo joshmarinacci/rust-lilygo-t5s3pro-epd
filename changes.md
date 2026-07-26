@@ -1,3 +1,29 @@
+## 2026-07-26 (2)
+
+**Fixed blank first page and added full settings persistence (`ereader_full`)**
+- Fixed blank first page: spine items whose stripped text is under 50 characters (e.g. cover image pages) are now skipped on startup and on chapter transitions in both directions.
+- Font size, orientation, and backlight level now survive full power-off: saved to NVS flash keys 2/3/4 on every page turn and every dropdown setting change; restored on cold boot alongside reading position. Previously these only survived deep sleep via RTC STORE registers.
+
+## 2026-07-26
+
+**Wired EPUB reader into `ereader_full` example**
+- Replaced hardcoded `moby_dick.txt` with `moby_dick.epub` (Project Gutenberg, 710 KB, 28 chapters, `include_bytes!`; git-ignored).
+- Added `EpubArchive::new(EPUB_DATA)` + `spine()` at startup; current chapter text is loaded on demand via `chapter_text()` from `epub.rs`.
+- Added `chapter_idx: usize` state. `paginate()`/`wrap_line_px()` generalized from references into a global static to references into any `&str` (lifetime follows the chapter text).
+- Chapter transitions: forward button advances to chapter N+1 when the last page is reached; back button at page 0 goes to start of previous chapter.
+- Persistence updated: flash key 0 = `page_offset` within chapter, key 1 = `chapter_idx`; RTC STORE6 = `chapter_idx` for deep-sleep wakeup.
+- Footer now shows `Ch.N/28` instead of a byte-offset page estimate.
+- `draw_footer` signature updated to take `chapter`/`chapter_count` directly.
+
+## 2026-07-25 (3)
+
+**Added: EPUB reader library modules (`src/epub.rs`, `src/layout.rs`, `src/reader.rs`)**
+- `src/layout.rs`: word-wrap paginator. `layout_chapter(text, cfg)` takes a `LayoutConfig` (screen dimensions, margins, `FontMetrics` with a `fn(&str)->u32` measure pointer) and returns a `Layout` with `Vec<Page>` of `(start, end)` byte offsets into the text. Handles paragraph breaks (`\n\n`), forced breaks (`\n`), paragraph spacing, and an ASCII glyph-width cache to avoid redundant `measure` calls.
+- `src/epub.rs`: no_std EPUB archive reader backed by `&[u8]` (e.g. `include_bytes!`). Parses the ZIP central directory once at `EpubArchive::new()`; extracts and decompresses entries on demand using `miniz_oxide` (DEFLATE) or direct copy (stored). Parses `META-INF/container.xml` and the OPF manifest/spine via `xmlparser` to build the ordered chapter list. XHTML chapters are stripped to plain text via a byte-level scanner that normalises whitespace, decodes common HTML entities (`&amp;`, `&nbsp;`, `&#NN;` etc.), and maps block tags to `\n`/`\n\n` paragraph breaks. Uses `xmlparser 0.13` (no_std + alloc) instead of `quick-xml` (std-only).
+- `src/reader.rs`: `ReaderState` holds one chapter's text, its `Layout`, and `current_page`/`anchor_byte`. `relayout()` re-paginates after a font-size change and repositions to the page containing `anchor_byte`. `turn_page()`, `current_text()`, `go_to_page()`, `page_count()`.
+- All three modules are `no_std + alloc`, no new dependencies beyond `miniz_oxide` and `xmlparser` (already in `Cargo.toml`).
+- Added `examples/epub_test.rs`: smoke-tests all three modules using `include_bytes!("test.epub")` (a 2.6 KB generated EPUB with two chapters); exercises spine parsing, XHTML stripping, layout, page turning, and relayout after font-size change. No display hardware needed. Added `examples/*.epub` to `.gitignore`.
+
 ## 2026-07-25 (2)
 
 **Added: `flash_demo` example**

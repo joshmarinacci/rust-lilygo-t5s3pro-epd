@@ -3,7 +3,7 @@
 
 extern crate alloc;
 
-use alloc::{format, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 
 use esp_backtrace as _;
 use esp_hal::{
@@ -39,14 +39,15 @@ use embedded_graphics::{
 
 use epaper::driver::{Display, DrawMode, Gt911};
 use epaper::driver::gt911::GT911_ADDR_PRIMARY;
+use epaper::epub::EpubArchive;
 use epaper::font::TextRenderer;
 use esp_storage::FlashStorage;
 use sequential_storage::{cache::NoCache, map};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-// ── Book text (embedded in flash at compile time) ─────────────────────────────
-const MOBY_DICK: &str = include_str!("moby_dick.txt");
+// ── Book EPUB (embedded in flash at compile time) ─────────────────────────────
+const EPUB_DATA: &[u8] = include_bytes!("moby_dick.epub");
 
 // ── I2C addresses ─────────────────────────────────────────────────────────────
 const BQ27220_ADDR: u8 = 0x55;
@@ -63,6 +64,10 @@ const TIME_UPDATE_SECS: u64 = 60;
 // ── Backlight ─────────────────────────────────────────────────────────────────
 const BL_DUTY:  [u8; 4]   = [0, 25, 60, 100];
 const BL_LABEL: [&str; 4] = ["Off", "Low", "Med", "Hi"];
+
+// Chapters with fewer non-whitespace characters than this threshold are skipped
+// (e.g. cover pages that only contain an <img> tag).
+const MIN_CHAPTER_CHARS: usize = 50;
 
 // ── Layout constants (physical display is always 960×540) ─────────────────────
 const HEADER_H:      i32 = 44;
@@ -159,14 +164,17 @@ impl<'d, 'hw> OriginDimensions for RotatedDisplay<'d, 'hw> {
 }
 
 // ── RTC STORE register helpers ────────────────────────────────────────────────
-// Base 0x6000_8000; STORE0@+0x50, STORE1@+0x54, STORE5@+0xC4, STORE6@+0xC8
-// STORE2/3 used by esp-hal for time. STORE4 used by ROM for boot messages.
+// STORE0 = page_offset within chapter
+// STORE1 = prev_page_offset within chapter
+// STORE5 = packed bl/orientation/font_sz
+// STORE6 = chapter_idx
 fn rtc_store_read(idx: u8) -> u32 {
     let r = esp_hal::peripherals::LPWR::regs();
     match idx {
         0 => r.store0().read().data().bits(),
         1 => r.store1().read().data().bits(),
         5 => r.store5().read().data().bits(),
+        6 => r.store6().read().data().bits(),
         _ => 0,
     }
 }
@@ -177,6 +185,7 @@ fn rtc_store_write(idx: u8, val: u32) {
         0 => { r.store0().write(|w| unsafe { w.data().bits(val) }); }
         1 => { r.store1().write(|w| unsafe { w.data().bits(val) }); }
         5 => { r.store5().write(|w| unsafe { w.data().bits(val) }); }
+        6 => { r.store6().write(|w| unsafe { w.data().bits(val) }); }
         _ => {}
     }
 }
@@ -192,7 +201,7 @@ fn is_charging(display: &mut Display<'_>) -> bool {
 }
 
 // ── Time string from RTC ──────────────────────────────────────────────────────
-fn rtc_time_str(rtc: &Rtc<'_>) -> alloc::string::String {
+fn rtc_time_str(rtc: &Rtc<'_>) -> String {
     let secs = (rtc.current_time_us() / 1_000_000) as u32;
     format!("{:02}:{:02}", (secs / 3600) % 24, (secs / 60) % 60)
 }
@@ -223,33 +232,35 @@ fn phys_to_logical(tx: i32, ty: i32, o: Orientation) -> (i32, i32) {
 }
 
 // ── Paginator ─────────────────────────────────────────────────────────────────
-// Returns (lines, next_byte_offset) — all slices reference into MOBY_DICK.
-fn paginate(
+// Breaks `text[start..]` into display lines; returns (lines, next_byte_offset).
+fn paginate<'a>(
     renderer: &TextRenderer,
+    text: &'a str,
     start: usize,
     content_h: i32,
     max_px: i32,
     font_px: f32,
-) -> (Vec<&'static str>, usize) {
+) -> (Vec<&'a str>, usize) {
     let line_h = renderer.line_height(font_px) + LEADING;
     let max_lines = (content_h / line_h.max(1)) as usize;
     let mut lines = Vec::with_capacity(max_lines);
     let mut pos = start;
-    while lines.len() < max_lines && pos < MOBY_DICK.len() {
-        let (line, next) = wrap_line_px(renderer, pos, max_px, font_px);
+    while lines.len() < max_lines && pos < text.len() {
+        let (line, next) = wrap_line_px(renderer, text, pos, max_px, font_px);
         lines.push(line);
         pos = next;
     }
     (lines, pos)
 }
 
-fn wrap_line_px(
+fn wrap_line_px<'a>(
     renderer: &TextRenderer,
+    text: &'a str,
     pos: usize,
     max_px: i32,
     font_px: f32,
-) -> (&'static str, usize) {
-    let s = &MOBY_DICK[pos..];
+) -> (&'a str, usize) {
+    let s = &text[pos..];
     let bytes = s.as_bytes();
     let n = bytes.len();
     if n == 0 { return ("", pos); }
@@ -359,7 +370,6 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
 }
 
 // ── Draw: header bar ──────────────────────────────────────────────────────────
-// Five equal zones; zones 3-5 are tappable.
 fn draw_header<D>(
     target: &mut D,
     time: &str,
@@ -381,22 +391,17 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
     let z = cw / 5; // zone width
     let ty = HEADER_H - 14; // text baseline
 
-    // Zone 1: time
     Text::new(time, Point::new(8, ty), black).draw(target).unwrap();
 
-    // Zone 2: battery
     let bat = if charging { format!("{soc}%[+]") } else { format!("{soc}%") };
     Text::new(&bat, Point::new(z + 4, ty), black).draw(target).unwrap();
 
-    // Zone 3: backlight (tappable — [2z..3z])
     let bl_s = format!("BL:{}", BL_LABEL[bl]);
     Text::new(&bl_s, Point::new(z * 2 + 4, ty), black).draw(target).unwrap();
 
-    // Zone 4: font size (tappable — [3z..4z])
     let sz_s = format!("Sz:{}", FONT_LABELS[font_sz_idx]);
     Text::new(&sz_s, Point::new(z * 3 + 4, ty), black).draw(target).unwrap();
 
-    // Zone 5: orientation (tappable — [4z..5z])
     let rot_s = format!("Rot:{}", o.label());
     Text::new(&rot_s, Point::new(z * 4 + 4, ty), black).draw(target).unwrap();
 }
@@ -430,15 +435,13 @@ fn draw_content(
 }
 
 // ── Draw: footer bar ──────────────────────────────────────────────────────────
-// status: non-empty → shown centred; empty → page number + button hint shown.
-fn draw_footer<D>(target: &mut D, status: &str, page: usize, total: usize)
+fn draw_footer<D>(target: &mut D, status: &str, chapter: usize, chapter_count: usize)
 where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debug
 {
     let cw = target.size().width  as i32;
     let ch = target.size().height as i32;
     let fy = ch - FOOTER_H;
 
-    // White background for footer (ensures clean render after partial update)
     Rectangle::new(
         Point::new(0, fy),
         Size::new(cw as u32, FOOTER_H as u32),
@@ -456,8 +459,8 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
         Text::with_alignment(status, Point::new(cw / 2, ty), small, Alignment::Center)
             .draw(target).unwrap();
     } else {
-        if page > 0 {
-            let s = format!("p.{page}/{total}");
+        if chapter_count > 0 {
+            let s = format!("Ch.{}/{}", chapter + 1, chapter_count);
             Text::new(&s, Point::new(8, ty), small).draw(target).unwrap();
         }
         Text::with_alignment(
@@ -467,16 +470,19 @@ where D: DrawTarget<Color = Gray4> + OriginDimensions, D::Error: core::fmt::Debu
     }
 }
 
-// ── Full page render; returns next_page_offset ────────────────────────────────
+// ── Full page render; returns next_page_offset within chapter_text ────────────
 fn render_page(
-    display:      &mut Display<'_>,
-    rtc:          &Rtc<'_>,
-    renderer:     &TextRenderer,
-    page_offset:  usize,
-    orientation:  Orientation,
-    bl_level:     usize,
-    font_sz_idx:  usize,
-    status:       &str,
+    display:       &mut Display<'_>,
+    rtc:           &Rtc<'_>,
+    renderer:      &TextRenderer,
+    chapter_text:  &str,
+    chapter_idx:   usize,
+    chapter_count: usize,
+    page_offset:   usize,
+    orientation:   Orientation,
+    bl_level:      usize,
+    font_sz_idx:   usize,
+    status:        &str,
 ) -> usize
 {
     let time = rtc_time_str(rtc);
@@ -485,26 +491,19 @@ fn render_page(
     let (_canvas_w, canvas_h, max_px, font_px, margin_x) = layout(orientation, font_sz_idx);
     let content_h = canvas_h - CONTENT_TOP - FOOTER_H;
 
-    let (lines, next_offset) = paginate(renderer, page_offset, content_h, max_px, font_px);
-
-    let line_h = (renderer.line_height(font_px) + LEADING).max(1);
-    let max_lines_est = (content_h / line_h).max(1) as usize;
-    let avg_line_chars = (max_px / 11).max(1) as usize;
-    let chars_per_page = (avg_line_chars * max_lines_est).max(1);
-    let page_num    = page_offset / chars_per_page + 1;
-    let total_pages = MOBY_DICK.len() / chars_per_page + 1;
+    let (lines, next_offset) = paginate(renderer, chapter_text, page_offset, content_h, max_px, font_px);
 
     {
         let mut rot = RotatedDisplay { inner: display, orientation };
         draw_header(&mut rot, &time, soc, chrg, bl_level, font_sz_idx, orientation);
-        draw_footer(&mut rot, status, page_num, total_pages);
+        draw_footer(&mut rot, status, chapter_idx, chapter_count);
     }
     draw_content(display, orientation, renderer, &lines, margin_x, font_px);
 
     next_offset
 }
 
-// ── Partial header update (only header rows are tainted; fast flush) ──────────
+// ── Partial header update ─────────────────────────────────────────────────────
 fn update_header_only(
     display:     &mut Display<'_>,
     rtc:         &Rtc<'_>,
@@ -558,8 +557,6 @@ impl embedded_storage_async::nor_flash::NorFlash for FlashAdapter {
 }
 
 // ── Minimal no_std executor ────────────────────────────────────────────────────
-// Sequential-storage futures over blocking flash are always Poll::Ready on the
-// first poll, so a noop-waker spin loop is safe here.
 fn block_on<F: core::future::Future>(mut f: F) -> F::Output {
     use core::{
         pin::Pin,
@@ -577,59 +574,80 @@ fn block_on<F: core::future::Future>(mut f: F) -> F::Output {
     }
 }
 
-// ── Persistent reading position (survives full power cycle) ───────────────────
+// ── Persistent reading position ────────────────────────────────────────────────
+// Key 0: page_offset (u32) within current chapter
+// Key 1: chapter_idx (u32)
 const NVS_FLASH_RANGE: core::ops::Range<u32> = 0x9000..0xF000;
-const POSITION_KEY: u8 = 0;
 
-fn flash_load_position() -> usize {
+// Returns (page_offset, chapter_idx, font_sz_idx, orientation_u32, bl_level).
+// Keys: 0=pos, 1=chapter, 2=font_sz, 3=orientation, 4=bl_level
+fn flash_load_position() -> (usize, usize, usize, u32, usize) {
     let mut flash = FlashAdapter(FlashStorage::new());
     let mut cache = NoCache::new();
-    let mut buf = [0u8; 64];
-    match block_on(map::fetch_item::<u8, u32, _>(
-        &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &POSITION_KEY,
-    )) {
-        Ok(Some(pos)) => {
-            let pos = pos as usize;
-            if pos < MOBY_DICK.len() {
-                println!("flash: resuming from byte {}", pos);
-                pos
-            } else {
-                println!("flash: saved offset {} out of bounds, starting at 0", pos);
-                0
-            }
+    let mut buf   = [0u8; 64];
+
+    let mut load = |key: u8, default: u32| -> u32 {
+        match block_on(map::fetch_item::<u8, u32, _>(
+            &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &key,
+        )) {
+            Ok(Some(v)) => v,
+            _           => default,
         }
-        Ok(None) => 0,
-        Err(e) => {
-            println!("flash: load error {:?}, starting at 0", e);
-            0
-        }
-    }
+    };
+
+    let pos     = load(0, 0) as usize;
+    let chapter = load(1, 0) as usize;
+    let font_sz = load(2, DEFAULT_FONT_SIZE as u32) as usize;
+    let ori     = load(3, 0);
+    let bl      = load(4, 1) as usize;
+
+    println!("flash: ch={} pos={} font={} ori={} bl={}", chapter, pos, font_sz, ori, bl);
+    (pos, chapter, font_sz, ori, bl)
 }
 
-fn flash_save_position(pos: usize) {
-    let mut flash = FlashAdapter(FlashStorage::new());
-    let mut cache = NoCache::new();
-    let mut buf = [0u8; 64];
-    if let Err(e) = block_on(map::store_item::<u8, u32, _>(
-        &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &POSITION_KEY, &(pos as u32),
-    )) {
-        println!("flash: save error {:?}", e);
-    }
-}
-
-// ── Two-pass dropdown close: WhiteOnBlack clear then full re-render ───────────
-fn restore_after_dropdown(
-    display:     &mut Display<'_>,
-    rtc:         &Rtc<'_>,
-    renderer:    &TextRenderer,
-    page_offset: usize,
+fn flash_save_position(
+    pos:         usize,
+    chapter_idx: usize,
+    font_sz_idx: usize,
     orientation: Orientation,
     bl_level:    usize,
-    font_sz_idx: usize,
+) {
+    let mut flash = FlashAdapter(FlashStorage::new());
+    let mut cache = NoCache::new();
+    let mut buf   = [0u8; 64];
+
+    let mut save = |key: u8, val: u32| {
+        if let Err(e) = block_on(map::store_item::<u8, u32, _>(
+            &mut flash, NVS_FLASH_RANGE, &mut cache, &mut buf, &key, &val,
+        )) {
+            println!("flash: save key {} error {:?}", key, e);
+        }
+    };
+
+    save(0, pos as u32);
+    save(1, chapter_idx as u32);
+    save(2, font_sz_idx as u32);
+    save(3, orientation.as_u32());
+    save(4, bl_level as u32);
+}
+
+// ── Two-pass dropdown close ────────────────────────────────────────────────────
+fn restore_after_dropdown(
+    display:       &mut Display<'_>,
+    rtc:           &Rtc<'_>,
+    renderer:      &TextRenderer,
+    chapter_text:  &str,
+    chapter_idx:   usize,
+    chapter_count: usize,
+    page_offset:   usize,
+    orientation:   Orientation,
+    bl_level:      usize,
+    font_sz_idx:   usize,
 ) -> usize {
     display.fill(0xF).unwrap();
     display.flush(DrawMode::WhiteOnBlack).unwrap();
-    let next = render_page(display, rtc, renderer, page_offset, orientation, bl_level, font_sz_idx, "");
+    let next = render_page(display, rtc, renderer, chapter_text, chapter_idx, chapter_count,
+                           page_offset, orientation, bl_level, font_sz_idx, "");
     display.flush(DrawMode::BlackOnWhite).unwrap();
     next
 }
@@ -648,42 +666,57 @@ fn main() -> ! {
         esp_hal::psram::PsramConfig { mode: esp_hal::psram::PsramMode::OctalSpi, ..Default::default() }
     );
 
-    // GPIO0 must be bound before pin_config! and before Rtc::new().
-    // We keep it as a mutable peripheral so we can reborrow it for the Input
-    // driver and later pass it via unsafe steal to Ext0WakeupSource at sleep time.
     let mut gpio0 = peripherals.GPIO0;
-
     let mut rtc = Rtc::new(peripherals.LPWR);
+
+    // ── Parse EPUB once at startup ────────────────────────────────────────────
+    let archive = EpubArchive::new(EPUB_DATA).expect("epub: parse failed");
+    let spine = archive.spine().expect("epub: spine failed");
+    let chapter_count = spine.len();
+    println!("epub: {} chapters", chapter_count);
 
     // ── Boot type and persisted state ─────────────────────────────────────────
     let is_first_boot = reset_reason(Cpu::ProCpu) != Some(SocResetReason::CoreDeepSleep);
 
     let (mut page_offset, mut prev_page_offset, mut bl_level, mut orientation,
-         mut font_sz_idx, wake_status) =
+         mut font_sz_idx, mut chapter_idx, wake_status) =
         if is_first_boot {
             rtc.set_current_time_us((INITIAL_HH * 3600 + INITIAL_MM * 60) * 1_000_000);
-            let saved = flash_load_position();
-            let ws = if saved > 0 { "Resumed" } else { "" };
-            println!("ereader: first boot, offset={}", saved);
-            (saved, saved, 1usize, Orientation::Deg0, DEFAULT_FONT_SIZE, ws)
+            let (saved_pos, saved_ch, saved_font, saved_ori, saved_bl) = flash_load_position();
+            let ch = saved_ch.min(chapter_count.saturating_sub(1));
+            let ws = if saved_pos > 0 || saved_ch > 0 { "Resumed" } else { "" };
+            println!("ereader: first boot, ch={} pos={}", ch, saved_pos);
+            (saved_pos, saved_pos,
+             saved_bl.min(BL_DUTY.len() - 1),
+             Orientation::from_u32(saved_ori),
+             saved_font.min(FONT_SIZES.len() - 1),
+             ch, ws)
         } else {
-            let po    = rtc_store_read(0) as usize;
-            let ppo   = rtc_store_read(1) as usize;
-            let pack  = rtc_store_read(5);
-            let bl    = (pack & 0xFF) as usize;
-            let ori   = Orientation::from_u32(pack >> 8);
-            let sz    = ((pack >> 10) & 0x3) as usize;
-            let ws    = match wakeup_cause() {
+            let po   = rtc_store_read(0) as usize;
+            let ppo  = rtc_store_read(1) as usize;
+            let pack = rtc_store_read(5);
+            let ch   = (rtc_store_read(6) as usize).min(chapter_count.saturating_sub(1));
+            let bl   = (pack & 0xFF) as usize;
+            let ori  = Orientation::from_u32(pack >> 8);
+            let sz   = ((pack >> 10) & 0x3) as usize;
+            let ws   = match wakeup_cause() {
                 SleepSource::Ext0 => "Awake! BOOT=prev  next=fwd",
                 _                 => "Awake!",
             };
-            println!("ereader: woke — po={} bl={} sz={}", po, bl, sz);
-            (po, ppo, bl.min(3), ori, sz.min(FONT_SIZES.len() - 1), ws)
+            println!("ereader: woke — ch={} pos={} bl={} sz={}", ch, po, bl, sz);
+            (po, ppo, bl.min(3), ori, sz.min(FONT_SIZES.len() - 1), ch, ws)
         };
 
+    // ── Load current chapter text (skip image-only/empty chapters) ───────────
+    let mut chapter_text: String = archive
+        .chapter_text(&spine[chapter_idx])
+        .expect("epub: chapter load failed");
+    while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx + 1 < chapter_count {
+        chapter_idx += 1;
+        chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+    }
+
     // ── Buttons ───────────────────────────────────────────────────────────────
-    // gpio0 is reborrowed for the Input so the owned gpio0 stays available for
-    // Ext0WakeupSource::new (via unsafe AnyPin::steal) at deep-sleep time.
     let boot_btn = Input::new(gpio0.reborrow(), InputConfig::default().with_pull(Pull::Up));
     let next_btn = Input::new(peripherals.GPIO38, InputConfig::default().with_pull(Pull::Up));
 
@@ -731,13 +764,14 @@ fn main() -> ! {
     }).unwrap();
     bl_ch.set_duty(BL_DUTY[bl_level]).unwrap();
 
-    // ── Font renderer (loads Georgia.ttf from flash into PSRAM) ──────────────
+    // ── Font renderer ─────────────────────────────────────────────────────────
     let renderer = TextRenderer::new();
 
     // ── Initial render ────────────────────────────────────────────────────────
     display.clear().unwrap();
     let mut next_page_offset = render_page(
-        &mut display, &rtc, &renderer, page_offset, orientation, bl_level, font_sz_idx, wake_status,
+        &mut display, &rtc, &renderer, &chapter_text, chapter_idx, chapter_count,
+        page_offset, orientation, bl_level, font_sz_idx, wake_status,
     );
     display.flush(DrawMode::BlackOnWhite).unwrap();
 
@@ -757,12 +791,28 @@ fn main() -> ! {
             if open_dropdown.is_some() {
                 open_dropdown = None;
                 next_page_offset = restore_after_dropdown(
-                    &mut display, &rtc, &renderer,
-                    page_offset, orientation, bl_level, font_sz_idx,
+                    &mut display, &rtc, &renderer, &chapter_text,
+                    chapter_idx, chapter_count, page_offset, orientation, bl_level, font_sz_idx,
                 );
             } else if page_offset != prev_page_offset {
+                // Go back within the current chapter.
                 page_offset = prev_page_offset;
-                flash_save_position(page_offset);
+                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                last_interaction = Instant::now();
+                redraw = true;
+            } else if chapter_idx > 0 {
+                // At the start of a chapter — go to start of previous non-empty chapter.
+                chapter_idx -= 1;
+                chapter_text = archive.chapter_text(&spine[chapter_idx])
+                    .expect("epub: chapter load");
+                while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx > 0 {
+                    chapter_idx -= 1;
+                    chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+                }
+                page_offset = 0;
+                prev_page_offset = 0;
+                next_page_offset = 0;
+                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
                 last_interaction = Instant::now();
                 redraw = true;
             }
@@ -777,13 +827,29 @@ fn main() -> ! {
             if open_dropdown.is_some() {
                 open_dropdown = None;
                 next_page_offset = restore_after_dropdown(
-                    &mut display, &rtc, &renderer,
-                    page_offset, orientation, bl_level, font_sz_idx,
+                    &mut display, &rtc, &renderer, &chapter_text,
+                    chapter_idx, chapter_count, page_offset, orientation, bl_level, font_sz_idx,
                 );
-            } else if next_page_offset < MOBY_DICK.len() {
+            } else if next_page_offset < chapter_text.len() {
+                // Next page within current chapter.
                 prev_page_offset = page_offset;
                 page_offset = next_page_offset;
-                flash_save_position(page_offset);
+                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
+                last_interaction = Instant::now();
+                redraw = true;
+            } else if chapter_idx + 1 < chapter_count {
+                // End of chapter — advance to next non-empty chapter.
+                chapter_idx += 1;
+                chapter_text = archive.chapter_text(&spine[chapter_idx])
+                    .expect("epub: chapter load");
+                while chapter_text.trim().len() < MIN_CHAPTER_CHARS && chapter_idx + 1 < chapter_count {
+                    chapter_idx += 1;
+                    chapter_text = archive.chapter_text(&spine[chapter_idx]).expect("epub: chapter load");
+                }
+                page_offset = 0;
+                prev_page_offset = 0;
+                next_page_offset = 0;
+                flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
                 last_interaction = Instant::now();
                 redraw = true;
             }
@@ -798,7 +864,6 @@ fn main() -> ! {
             let z  = cw / 5;
 
             if let Some(kind) = open_dropdown {
-                // ── Dropdown open: select an item or dismiss ──────────────────
                 let (drop_x, drop_w) = dropdown_x_and_w(kind, z, cw);
                 let n_items = match kind {
                     Dropdown::Backlight => BL_LABEL.len() as i32,
@@ -828,15 +893,15 @@ fn main() -> ! {
                         }
                         Dropdown::Battery => {}
                     }
+                    flash_save_position(page_offset, chapter_idx, font_sz_idx, orientation, bl_level);
                 }
                 open_dropdown = None;
                 next_page_offset = restore_after_dropdown(
-                    &mut display, &rtc, &renderer,
-                    page_offset, orientation, bl_level, font_sz_idx,
+                    &mut display, &rtc, &renderer, &chapter_text,
+                    chapter_idx, chapter_count, page_offset, orientation, bl_level, font_sz_idx,
                 );
 
             } else if ly < HEADER_H {
-                // ── No dropdown open: open one for the tapped zone ────────────
                 let new_kind = match lx / z {
                     1 => Some(Dropdown::Battery),
                     2 => Some(Dropdown::Backlight),
@@ -848,12 +913,12 @@ fn main() -> ! {
                     open_dropdown = Some(kind);
                     let (drop_x, drop_w) = dropdown_x_and_w(kind, z, cw);
                     if kind == Dropdown::Battery {
-                        let soc     = read_soc(&mut display);
-                        let chrg    = is_charging(&mut display);
-                        let volt    = display.i2c_read_u16(BQ27220_ADDR, 0x08);
-                        let curr    = display.i2c_read_i16(BQ27220_ADDR, 0x0C);
-                        let remain  = display.i2c_read_u16(BQ27220_ADDR, 0x10);
-                        let full    = display.i2c_read_u16(BQ27220_ADDR, 0x12);
+                        let soc    = read_soc(&mut display);
+                        let chrg   = is_charging(&mut display);
+                        let volt   = display.i2c_read_u16(BQ27220_ADDR, 0x08);
+                        let curr   = display.i2c_read_i16(BQ27220_ADDR, 0x0C);
+                        let remain = display.i2c_read_u16(BQ27220_ADDR, 0x10);
+                        let full   = display.i2c_read_u16(BQ27220_ADDR, 0x12);
                         let mut rot = RotatedDisplay { inner: &mut display, orientation };
                         draw_battery_panel(&mut rot, drop_x, soc, chrg, volt, curr, remain, full);
                     } else {
@@ -875,7 +940,6 @@ fn main() -> ! {
                 }
             }
 
-            // Wait for finger lift
             loop {
                 delay.delay_millis(20);
                 if display.read_touch(&mut gt911).is_none() { break; }
@@ -891,7 +955,7 @@ fn main() -> ! {
 
         // ── Inactivity → deep sleep ───────────────────────────────────────────
         if last_interaction.elapsed().as_secs() >= SLEEP_AFTER_SECS {
-            println!("ereader: sleeping");
+            println!("ereader: sleeping (ch={} pos={})", chapter_idx, page_offset);
 
             update_footer_only(&mut display, "Sleeping... Press BOOT to wake", orientation);
             display.flush(DrawMode::BlackOnWhite).unwrap();
@@ -902,9 +966,8 @@ fn main() -> ! {
             rtc_store_write(0, page_offset as u32);
             rtc_store_write(1, prev_page_offset as u32);
             rtc_store_write(5, bl_level as u32 | (orientation.as_u32() << 8) | ((font_sz_idx as u32) << 10));
+            rtc_store_write(6, chapter_idx as u32);
 
-            // GPIO38 is not RTC-capable on ESP32-S3 and cannot wake from deep
-            // sleep. Only GPIO0 (BOOT) is used as the wakeup source.
             let wakeup_pin = unsafe { esp_hal::gpio::AnyPin::steal(0) };
             let boot_src = Ext0WakeupSource::new(wakeup_pin, WakeupLevel::Low);
             rtc.sleep_deep(&[&boot_src]);
@@ -914,7 +977,8 @@ fn main() -> ! {
         if redraw {
             display.clear().unwrap();
             next_page_offset = render_page(
-                &mut display, &rtc, &renderer, page_offset, orientation, bl_level, font_sz_idx, "",
+                &mut display, &rtc, &renderer, &chapter_text, chapter_idx, chapter_count,
+                page_offset, orientation, bl_level, font_sz_idx, "",
             );
             display.flush(DrawMode::BlackOnWhite).unwrap();
             redraw = false;
