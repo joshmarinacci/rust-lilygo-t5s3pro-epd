@@ -12,6 +12,13 @@ impl TextRenderer {
         TextRenderer { font }
     }
 
+    /// Create a renderer using arbitrary TTF/OTF data embedded via `include_bytes!`.
+    pub fn with_font(data: &'static [u8]) -> Self {
+        let font = fontdue::Font::from_bytes(data, fontdue::FontSettings::default())
+            .expect("font parse error");
+        TextRenderer { font }
+    }
+
     /// Draw `text` with its baseline at (start_x, baseline_y).
     /// `bg` is the background Gray4 value (15 = white). Returns the x position after the last glyph.
     /// `draw` receives (x: i32, y: i32, gray4: u8) for each non-transparent pixel.

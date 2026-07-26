@@ -1,3 +1,53 @@
+## 2026-07-26 (12)
+
+**font_compare: adjust size list to [15, 18, 22, 26, 32]**
+- Changed from `[15, 18, 22, 28, 32]` to `[15, 18, 22, 26, 32]` (28 → 26).
+
+## 2026-07-26 (11)
+
+**font_compare: single-font view grouped by weight**
+- Reorganised single-font view: outer loop is now weight (Regular / Bold / Italic), inner loop is all five sizes smallest-to-largest. Previously the outer loop was size and inner loop was weight.
+
+## 2026-07-26 (10)
+
+**font_compare: fix loading-text clear, fix label overlap, add single-font view**
+- **Loading text clear**: replaced `display.clear()` + single `flush(BlackOnWhite)` with the two-flush pattern — `flush(WhiteOnBlack)` actively drives dark pixels to white (the only way to erase them on this EPD), then `render()` again + `flush(BlackOnWhite)` draws the fonts cleanly.
+- **Label overlap**: `draw_label()` now computes the y-advancement as `13 + 3 + font_px * 0.75` so that the main TTF font's ascenders (which extend upward from the baseline) always clear the label by ~3 px at every size.
+- **Single-font view** (NEXT button / GPIO38): shows all four sizes × three weights for one font family. NEXT cycles through faces; BOOT returns to all-fonts view.
+- Header and group/size labels all use bitmap fonts (FONT_10X20 / FONT_7X13) — no TTF loaded just for labels.
+
+## 2026-07-26 (9)
+
+**font_compare: portrait mode, 6 families, subsetted fonts**
+- Added Crimson Pro, Atkinson Hyperlegible, and Alegreya (Regular/Bold/Italic each) downloaded from Google Fonts and auto-renamed from actual font name-table style records.
+- Switched to portrait orientation (`DisplayRotation::Rotate90`). All drawing goes through `put_pixel()` which applies the Rotate90 transform (physical_x = Width−1−ly, physical_y = lx) before calling `set_pixel`, so the framebuffer stores portrait content correctly.
+- Subsetted all 18 font files to the 62 glyphs actually used (pyftsubset, `kern`/`liga`/`calt` features kept). Fonts shrank from 50–225 KB to 12–19 KB (~10× reduction); fontdue now parses each in a fraction of a second.
+- Added `hline()` helper for drawing horizontal rules in portrait space.
+- Tightened sample text slightly to fit portrait width at all four sizes.
+
+## 2026-07-26 (8)
+
+**font_compare: loading screen + right-aligned font labels**
+- Added `show_loading()`: draws "Rasterizing fonts at Xpx — please wait…" using the embedded-graphics `FONT_10X20` bitmap font (no TTF parsing, instant) before the slow fontdue render begins; the subsequent `BlackOnWhite` flush clears it automatically.
+- Moved font name labels to the right margin (right-aligned via `measure_width`) so they no longer overlap the sample text lines on the left.
+
+## 2026-07-26 (7)
+
+**Fix font_compare crash: load fonts one at a time instead of all 9 simultaneously**
+- fontdue eagerly parses all glyph outlines at `Font::from_bytes` time. Loading 9 fonts simultaneously via a `[FontGroup; 3]` array literal exhausted the PSRAM (each font ~500-700KB × 9 = memory pressure at startup).
+- Replaced the struct-per-group approach with `draw_line()`: each call loads the font, draws one text line, then drops the font. Peak heap is now ~1 font object at a time.
+- Added `esp_alloc::heap_allocator!(size: 256 * 1024)` alongside the existing `psram_allocator!` as an allocator bootstrap for small/early allocations.
+- Removed the `FontGroup` struct; the font table is now a simple `const` array of `(&str, &[u8], &[u8], &[u8])` tuples.
+
+## 2026-07-26 (6)
+
+**Add font_compare example: Literata, Vollkorn, Noticia Text side by side**
+- New `examples/font_compare.rs` renders the same three sample lines (Regular, Bold, Italic) in each of three Google Fonts across the full 960×540 display.
+- BOOT button cycles through four font sizes: 15, 18, 22, 28 px.
+- Added `TextRenderer::with_font(data: &'static [u8])` constructor to `src/font.rs` so any embedded TTF can be used without modifying the library.
+- Flash footprint: ~1.83 MB (9 embedded TTFs ≈ 1.5 MB + code); fits within the 4 MB app partition.
+- Fonts are gitignored; download instructions are in the plan file.
+
 ## 2026-07-26 (5)
 
 **Fast-scroll: hold BOOT/next button for 1 second to jump many pages**
