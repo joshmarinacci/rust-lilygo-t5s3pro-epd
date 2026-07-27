@@ -26,7 +26,7 @@ use esp_hal::{
     gpio::{Input, InputConfig, Pull},
 };
 use iris_ui::{
-    Theme, ViewStyle,
+    FontKind, Theme, ViewStyle,
     button::{make_button, make_full_button},
     device::EmbeddedDrawingContext,
     geom::Bounds,
@@ -45,8 +45,8 @@ use epaper::driver::gt911::GT911_ADDR_PRIMARY;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const THEME: Theme = Theme {
-    font:      FONT_10X20,
-    bold_font: FONT_9X18_BOLD,
+    font:      FontKind::Bitmap(FONT_10X20),
+    bold_font: FontKind::Bitmap(FONT_9X18_BOLD),
     standard:  ViewStyle { fill: Rgb565::WHITE, text: Rgb565::BLACK },
     accented:  ViewStyle { fill: Rgb565::BLACK, text: Rgb565::WHITE },
     selected:  ViewStyle { fill: Rgb565::BLACK, text: Rgb565::WHITE },

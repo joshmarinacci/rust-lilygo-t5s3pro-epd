@@ -1,3 +1,11 @@
+## 2026-07-27
+
+**Updated: link iris-ui to local path and update iris_demo for new API**
+- Changed `iris-ui` dependency in `Cargo.toml` from git URL to `path = "../rust-embedded-gui"`.
+- Added `FontKind` to imports in `examples/iris_demo.rs`.
+- Updated `THEME` constant to wrap bitmap fonts in `FontKind::Bitmap(...)` to match the new `Theme` struct where `font`/`bold_font` fields are `FontKind` instead of raw `MonoFont`.
+- The existing `Rgb565Adapter` continues to work with the now-generic `EmbeddedDrawingContext<T>` since `FromRgb565 for Rgb565` is implemented in the library.
+
 ## 2026-07-26
 
 **Added: `wifi_ntp` example — WiFi NTP time sync with EPD console display**
