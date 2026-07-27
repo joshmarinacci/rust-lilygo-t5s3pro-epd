@@ -244,7 +244,7 @@ fn main() -> ! {
             delay.delay_millis(50);
             while next_btn.is_low() {}
             delay.delay_millis(50);
-            event_at_focused(&mut scene, &InputEvent::Action(InputpAction::FocusNext));
+            event_at_focused(&mut scene, &InputEvent::Action(InputAction::FocusNext));
             needs_flush = true;
         }
 
