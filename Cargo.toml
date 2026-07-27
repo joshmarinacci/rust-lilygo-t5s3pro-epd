@@ -18,6 +18,7 @@ esp-storage = { version = "0.4", features = ["esp32s3", "nor-flash"] }
 embedded-storage = "0.3"
 embedded-storage-async = "0.4"
 sequential-storage = "3.0"
+iris-ui            = { git = "https://github.com/joshmarinacci/iris-ui" }
 
 [profile.dev]
 opt-level = "s"
