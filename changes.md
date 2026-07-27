@@ -1,3 +1,14 @@
+## 2026-07-26
+
+**Added: `wifi_ntp` example — WiFi NTP time sync with EPD console display**
+- Connects to WiFi (SSID/password from `WIFI_SSID`/`WIFI_PASS` env vars at build time).
+- Queries `time.google.com:123` via a raw 48-byte UDP NTP packet (no DNS required).
+- Parses the NTP transmit timestamp and converts to Unix microseconds, then sets the ESP32-S3 hardware RTC via `rtc.set_current_time_us()`.
+- Shows a scrolling console-style status log on the EPD display (landscape 960×540) and serial simultaneously.
+- After sync, displays the current UTC time every 10 seconds from the RTC.
+- Uses `esp-radio 0.18.0` (WiFi), `esp-rtos 0.3.0` (async scheduler), `embassy-net 0.8.0` (TCP/IP stack), and `embassy-executor 0.10.0`; all added to `Cargo.toml`.
+- Build: `export WIFI_SSID=MyNetwork WIFI_PASS=secret && cargo run --example wifi_ntp`
+
 ## 2026-07-26 (12)
 
 **font_compare: adjust size list to [15, 18, 22, 26, 32]**
