@@ -38,7 +38,7 @@ use iris_ui::{
     toggle_group::make_toggle_group,
     view::{Align, Flex, ViewId},
 };
-
+use iris_ui::toggle_button::make_toggle_button;
 use epaper::driver::{Display, DrawMode, Gt911};
 use epaper::driver::gt911::GT911_ADDR_PRIMARY;
 
@@ -100,15 +100,16 @@ fn rgb565_to_gray4(c: Rgb565) -> Gray4 {
 
 // ── Scene rendering ───────────────────────────────────────────────────────────
 
-fn render(display: &mut Display, scene: &mut Scene) {
+fn render(display: &mut Display, scene: &mut Scene, scale: u32) {
     // EmbeddedDrawingContext::new() initializes clip to Bounds::new_empty()
     // which has size {w:-99, h:-99}. bounds_to_rect casts w/h to u32, causing
     // "width is too large" panic. Must set ctx.clip to a valid region first.
     // draw_scene only runs when scene.dirty=true; mark_dirty_all/mark_dirty_view
     // set dirty_rect to valid non-negative bounds before we call render.
-    let clip = scene.dirty_rect;
+    let clip = scene.dirty_rect.scaled(scale);
     let mut adapter = Rgb565Adapter(display);
-    let mut ctx = EmbeddedDrawingContext::new(&mut adapter);
+    // let mut ctx = EmbeddedDrawingContext::new(&mut adapter);
+    let mut ctx = EmbeddedDrawingContext::new_with_scale(&mut adapter, scale);
     ctx.clip = clip;
     layout_scene(scene, &THEME);
     draw_scene(scene, &mut ctx, &THEME);
@@ -174,72 +175,25 @@ fn main() -> ! {
     let boot_btn = Input::new(gpio0,  InputConfig::default().with_pull(Pull::Up));
     let next_btn = Input::new(gpio38, InputConfig::default().with_pull(Pull::Up));
 
+    let SCALE:u32 = 2;
     // ── Build scene ───────────────────────────────────────────────────────────
-    let mut scene = Scene::new_with_bounds(Bounds::new(0, 0, 960, 540));
+    // let mut scene = Scene::new_with_bounds(Bounds::new(0, 0, 960, 540));
+    let mut scene = Scene::new_with_scale(Bounds::new(0, 0, (960 / SCALE) as i32, (540 / SCALE) as i32), SCALE);
+    let panel1 = ViewId::new("panel1");
+    let pan = make_panel(&panel1)
+        .with_layout(Some(layout_vbox))
+        .with_visible(true);
+    let l1 = make_label("l1","The first label");
+    scene.add_view_to_parent(l1, &panel1);
+    // let b1 = make_full_button(&ViewId::new("b1"), "The first button","toggle",false);
+    // scene.add_view_to_parent(b1, &pan.name);
+    let b2 = make_full_button(&ViewId::new("b2"), "The second button","toggle2",false);
+    // scene.add_view_to_parent(b2, &pan.name);
+    //
+    let t1 = make_toggle_button(&ViewId::new("toggle1"),"Toggle");
+    scene.add_view_to_parent(t1, &pan.name);
 
-    // Root is a full-screen vbox; content is vertically centered via spacers.
-    {
-        let root_id = scene.root_id();
-        let root = scene.get_view_mut(&root_id).unwrap();
-        root.layout = Some(layout_vbox);
-        root.h_flex  = Flex::Grow;
-        root.v_flex  = Flex::Grow;
-    }
-
-    // Top spacer — invisible, grows to consume half the leftover vertical space.
-    {
-        let mut spacer = make_panel(&SPACER_TOP);
-        spacer.layout = Some(layout_std_panel);
-        spacer.v_flex = Flex::Grow;
-        spacer.h_flex = Flex::Grow;
-        spacer.draw   = None;
-        scene.add_view_to_root(spacer);
-    }
-
-    // Center panel — shrinks to content size; h_align=Center horizontally centers
-    // it within the 960px root vbox (layout_vbox uses (avail_w - w) / 2 for Center).
-    {
-        let mut center = make_panel(&CENTER_PANEL);
-        center.layout  = Some(layout_vbox);
-        center.h_flex  = Flex::Shrink;
-        center.v_flex  = Flex::Shrink;
-        center.h_align = Align::Center;
-        scene.add_view_to_root(center);
-    }
-
-    // Content inside the center panel
-    scene.add_view_to_parent(make_header_label("header", "Iris UI Demo"), &CENTER_PANEL);
-
-    // Button row (hbox, Shrink so center panel width = max-child width)
-    let mut btn_row = make_panel(&BTN_ROW);
-    btn_row.layout = Some(layout_hbox);
-    btn_row.h_flex = Flex::Shrink;
-    scene.add_view_to_parent(btn_row, &CENTER_PANEL);
-    scene.add_view_to_parent(make_button(&BTN1, "Button 1"), &BTN_ROW);
-    scene.add_view_to_parent(make_button(&BTN2, "Button 2"), &BTN_ROW);
-    scene.add_view_to_parent(
-        make_full_button(&BTN3, "Primary", "primary_action", true),
-        &BTN_ROW,
-    );
-
-    // Toggle group
-    scene.add_view_to_parent(
-        make_toggle_group(&TOGGLE, alloc::vec!["Opt A", "Opt B", "Opt C"], 0),
-        &CENTER_PANEL,
-    );
-
-    // Status label
-    scene.add_view_to_parent(make_label("status", "Tap a button or option..."), &CENTER_PANEL);
-
-    // Bottom spacer — mirrors top; together they split remaining space 50/50.
-    {
-        let mut spacer = make_panel(&SPACER_BOT);
-        spacer.layout = Some(layout_std_panel);
-        spacer.v_flex = Flex::Grow;
-        spacer.h_flex = Flex::Grow;
-        spacer.draw   = None;
-        scene.add_view_to_root(spacer);
-    }
+    scene.add_view_to_root(pan);
 
     scene.mark_dirty_all();
     scene.mark_layout_dirty();
@@ -247,10 +201,10 @@ fn main() -> ! {
     // Initial two-flush to clear any ghost ink from previous display state.
     // draw_scene resets dirty_rect to new_empty() after the first pass, so
     // mark_dirty_all() re-enables drawing for the second pass.
-    render(&mut display, &mut scene);
+    render(&mut display, &mut scene, SCALE);
     display.flush(DrawMode::WhiteOnBlack).unwrap();
     scene.mark_dirty_all();
-    render(&mut display, &mut scene);
+    render(&mut display, &mut scene, SCALE);
     display.flush(DrawMode::BlackOnWhite).unwrap();
 
     // ── Main loop ─────────────────────────────────────────────────────────────
@@ -261,7 +215,10 @@ fn main() -> ! {
 
         // Touch input → hit-test the scene, dispatch Tap event
         if let Some((tx, ty)) = display.read_touch(&mut gt911) {
-            let pt = iris_ui::geom::Point::new(tx as i32, ty as i32);
+            let pt = iris_ui::geom::Point::new(((tx as u32) / SCALE) as i32,((ty as u32)/SCALE) as i32);
+            esp_println::println!("[iris] {}", pt);
+
+            needs_flush = true;
             if let Some(result) = click_at(&mut scene, &empty_handlers, pt) {
                 handle_action(result.action, &mut scene);
                 needs_flush = true;
@@ -287,12 +244,17 @@ fn main() -> ! {
             delay.delay_millis(50);
             while next_btn.is_low() {}
             delay.delay_millis(50);
-            event_at_focused(&mut scene, &InputEvent::Action(InputAction::FocusNext));
+            event_at_focused(&mut scene, &InputEvent::Action(InputpAction::FocusNext));
             needs_flush = true;
         }
 
         if needs_flush {
-            render(&mut display, &mut scene);
+            esp_println::println!("[iris] redrawing");
+            scene.mark_dirty_all();
+            render(&mut display, &mut scene, SCALE);
+            display.flush(DrawMode::WhiteOnBlack).unwrap();
+            scene.mark_dirty_all();
+            render(&mut display, &mut scene, SCALE);
             display.flush(DrawMode::BlackOnWhite).unwrap();
         }
     }
