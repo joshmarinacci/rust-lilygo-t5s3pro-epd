@@ -110,6 +110,22 @@
 - All three modules are `no_std + alloc`, no new dependencies beyond `miniz_oxide` and `xmlparser` (already in `Cargo.toml`).
 - Added `examples/epub_test.rs`: smoke-tests all three modules using `include_bytes!("test.epub")` (a 2.6 KB generated EPUB with two chapters); exercises spine parsing, XHTML stripping, layout, page turning, and relayout after font-size change. No display hardware needed. Added `examples/*.epub` to `.gitignore`.
 
+## 2026-07-26 (2)
+
+**Updated: `iris_demo` — centered panel layout**
+- Wrapped all content in a `CENTER_PANEL` (layout_vbox, h_flex=Shrink, v_flex=Shrink, h_align=Center) so iris-ui's layout engine horizontally centers it within the 960px root vbox.
+- Added invisible `SPACER_TOP` / `SPACER_BOT` panels (v_flex=Grow, draw=None) flanking the center panel; they split remaining vertical space 50/50, pushing content to the vertical center of the screen.
+- Changed `btn_row.h_flex` from Grow to Shrink so the panel width is sized to its content rather than full-screen width.
+
+## 2026-07-26
+
+**Added: `iris_demo` example — iris-ui integration with EPD display**
+- Integrates the [iris-ui](https://github.com/joshmarinacci/iris-ui) no_std embedded UI toolkit as a git dependency.
+- Added a thin `Rgb565Adapter` wrapper (implements `DrawTarget<Color=Rgb565>` over the Gray4 EPD display) to bridge iris-ui's color requirement with the e-paper display. Uses luminance conversion (BW_THEME maps to pure black/white anyway).
+- Scene has: a header label, an hbox row of 3 buttons (two normal, one primary), a 3-option toggle group, and a status label that updates with the last command/selection.
+- Touch input routes through `iris_ui::scene::click_at`; BOOT and GPIO38 buttons navigate focus via `event_at_focused`.
+- Initial render uses double-flush (WhiteOnBlack then BlackOnWhite) to clear ghost ink; subsequent updates use a single partial flush via iris-ui's dirty-rect tracking.
+
 ## 2026-07-25 (2)
 
 **Added: `flash_demo` example**

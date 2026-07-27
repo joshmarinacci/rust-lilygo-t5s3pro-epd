@@ -26,6 +26,7 @@ embassy-executor = "0.10.0"
 embassy-net     = { version = "0.8.0",  features = ["dhcpv4", "medium-ethernet", "udp"] }
 embassy-time    = "0.5.0"
 static_cell     = "2.1.0"
+iris-ui            = { git = "https://github.com/joshmarinacci/iris-ui" }
 
 [profile.dev]
 opt-level = "s"
