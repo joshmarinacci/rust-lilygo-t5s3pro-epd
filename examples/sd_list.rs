@@ -20,6 +20,7 @@ use esp_hal::{
     delay::Delay,
     gpio::{Level, Output, OutputConfig},
     spi::master::{Config as SpiConfig, Spi},
+    time::Instant,
 };
 use esp_println::println;
 
@@ -111,17 +112,19 @@ fn main() -> ! {
     let mgr = VolumeManager::<_, _, 16, 4, 1>::new_with_limits(sdcard, DummyTimesource, 0);
 
     // Try to open Volume 0 (first partition). This also triggers SD init.
+    println!("[sd] looking for SD card...");
+    let t0 = Instant::now();
     let vol = match mgr.open_volume(VolumeIdx(0)) {
         Ok(v) => {
-            println!("[sd] card detected");
+            println!("[sd] card detected ({} ms)", t0.elapsed().as_millis());
             v
         }
         Err(Error::DeviceError(SdCardError::CardNotFound)) => {
-            println!("[sd] no SD card detected");
+            println!("[sd] no SD card detected ({} ms)", t0.elapsed().as_millis());
             loop {}
         }
         Err(e) => {
-            println!("[sd] error: {:?}", e);
+            println!("[sd] error ({} ms): {:?}", t0.elapsed().as_millis(), e);
             loop {}
         }
     };
@@ -135,8 +138,9 @@ fn main() -> ! {
     };
 
     println!("[sd] /");
+    let t1 = Instant::now();
     list_dir(&root, 1);
-    println!("[sd] done");
+    println!("[sd] done ({} ms)", t1.elapsed().as_millis());
 
     loop {}
 }

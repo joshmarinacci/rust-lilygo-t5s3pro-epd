@@ -1,3 +1,11 @@
+## 2026-07-28 (6)
+
+**Updated: `sd_list` — add timing output**
+- Prints "looking for SD card..." before attempting `open_volume`.
+- Reports elapsed milliseconds on each outcome: card detected, not found, or error.
+- Reports elapsed milliseconds for the directory listing phase.
+- Uses `esp_hal::time::Instant::now()` / `.elapsed().as_millis()`.
+
 ## 2026-07-28 (5)
 
 **Added: `sd_list` example — detect SD card and recursively list filesystem**
