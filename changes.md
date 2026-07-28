@@ -1,3 +1,11 @@
+## 2026-07-28 (3)
+
+**Added: `lora_rx` example — passively receive LoRa packets on the onboard SX1262**
+- Created `examples/lora_rx.rs`: powers LoRa via PCA9555 I/O expander, initialises SPI2 (GPIO14/13/21, CS=GPIO46) and the SX1262 (RST=GPIO1, BUSY=GPIO47, DIO1=GPIO10) in continuous-RX mode, and prints each received packet as a hex dump with RSSI/SNR to serial.
+- Uses raw SPI commands (no external driver crate): SetStandby → SetPacketType → SetRfFrequency → SetModulationParams → SetPacketParams → SetDioIrqParams → SetRx(continuous).
+- Configurable via constants at the top of the file: `FREQ_HZ` (default 915 MHz), `SF` (default 7), `BW` (default 125 kHz), `CR` (default 4/5). All must match the transmitter.
+- Run: `cargo run --example lora_rx`
+
 ## 2026-07-28 (2)
 
 **Added: `gps` example — read NMEA location fixes from onboard GPS module**
