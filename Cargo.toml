@@ -4,26 +4,37 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+log                    = "0.4"
+embedded-hal           = "1"
+embedded-graphics-core = "0.4"
+embedded-graphics      = "0.8"
+embedded-storage       = "0.3"
+embedded-storage-async = "0.4"
+sequential-storage     = "3.0"
+iris-ui                     = { path = "../rust-embedded-gui" }
+embedded-graphics-simulator = { version = "0.8.0", optional = true }
+
+# ESP32-specific dependencies — only compiled when targeting xtensa
+[target.'cfg(target_arch = "xtensa")'.dependencies]
 esp-hal                = { version = "1.1.0", features = ["esp32s3", "unstable"] }
 esp-alloc              = "0.10.0"
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3"] }
 esp-backtrace          = { version = "0.19.0", features = ["esp32s3", "panic-handler", "println"] }
 esp-println            = { version = "0.17.0", features = ["esp32s3", "log-04"] }
-log                    = "0.4"
-embedded-hal           = "1"
-embedded-graphics-core = "0.4"
-embedded-graphics      = "0.8"
 esp-storage            = { version = "0.4", features = ["esp32s3", "nor-flash"] }
-embedded-storage       = "0.3"
-embedded-storage-async = "0.4"
-sequential-storage = "3.0"
-esp-radio       = { version = "0.18.0", features = ["wifi", "esp32s3"] }
-esp-rtos        = { version = "0.3.0",  features = ["esp32s3", "esp-radio", "embassy"] }
-embassy-executor = "0.10.0"
-embassy-net     = { version = "0.8.0",  features = ["dhcpv4", "medium-ethernet", "udp"] }
-embassy-time    = "0.5.0"
-static_cell     = "2.1.0"
-iris-ui            = { path = "../rust-embedded-gui" }
+esp-radio              = { version = "0.18.0", features = ["wifi", "esp32s3"] }
+esp-rtos               = { version = "0.3.0",  features = ["esp32s3", "esp-radio", "embassy"] }
+embassy-executor       = "0.10.0"
+embassy-net            = { version = "0.8.0",  features = ["dhcpv4", "medium-ethernet", "udp"] }
+embassy-time           = "0.5.0"
+static_cell            = "2.1.0"
+
+[features]
+sim = ["iris-ui/std", "dep:embedded-graphics-simulator"]
+
+[[example]]
+name = "iris_demo_sim"
+required-features = ["sim"]
 
 [profile.dev]
 opt-level = "s"

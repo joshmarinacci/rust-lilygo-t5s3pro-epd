@@ -71,6 +71,7 @@ cargo run --example <name>
 
 | Example          | Description                                                                                                  |
 |------------------|--------------------------------------------------------------------------------------------------------------|
+| `iris_demo`      | Iris UI demo: label + toggle button rendered with `iris-ui`; touch = tap, BOOT/GPIO38 = focus navigation     |
 | `clock`          | Deep-sleep clock; draws HH:MM:SS, sleeps 10 s or wakes on BOOT press, redraws; set `INITIAL_HH/MM/SS` before flashing |
 | `ebook`          | 3-page e-book demo; BOOT (GPIO0) = previous page, GPIO38 = next page; hold GPIO38 to cycle orientation       |
 | `ereader_full`   | Full Moby Dick reader; TrueType antialiased text; header dropdown menus for backlight, font size, rotation, and battery stats; deep sleep after 60 s of inactivity; reading position persists across full power cycles via NVS flash |
@@ -89,6 +90,43 @@ cargo run --example touch_button
 
 The `--monitor` flag is included automatically via `.cargo/config.toml`, so serial output appears in the terminal after
 flashing.
+
+## Simulator (no hardware required)
+
+`iris_demo_sim` is a host-native variant of `iris_demo` that renders into an SDL2 window using
+[`embedded-graphics-simulator`](https://crates.io/crates/embedded-graphics-simulator).  It is useful
+for iterating on UI layouts without flashing the device.
+
+**Prerequisites:** SDL2 must be installed.
+
+```
+brew install sdl2
+```
+
+**Run (Apple Silicon Mac):**
+
+```
+cargo run --example iris_demo_sim --features sim \
+    --target aarch64-apple-darwin \
+    --config 'unstable.build-std=["std"]'
+```
+
+The `--config` flag is required because `.cargo/config.toml` sets `build-std = ["alloc", "core"]`
+for the bare-metal xtensa target; this overrides it so the host standard library is used instead.
+
+**Controls:**
+
+| Input              | Action                        |
+|--------------------|-------------------------------|
+| Mouse click        | Touch / tap                   |
+| Left / Up arrow    | Move focus to previous widget |
+| Right / Down arrow | Move focus to next widget     |
+| Close window / Q   | Quit                          |
+
+**How it works:** the `sim` feature enables `iris-ui/std` (which activates the SDL2 backend in
+`iris-ui`) and `embedded-graphics-simulator`. ESP32-specific dependencies and the `src/driver`
+module are gated behind `#[cfg(target_arch = "xtensa")]`, so the crate compiles cleanly for both
+targets.
 
 ## Project Structure
 

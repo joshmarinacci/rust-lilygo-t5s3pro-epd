@@ -1,3 +1,15 @@
+## 2026-07-28
+
+**Added: `iris_demo_sim` example — simulator variant of `iris_demo` for local development**
+- Added `embedded-graphics-simulator = "0.8.0"` as an optional dependency.
+- Added `sim` feature that enables `iris-ui/std` (SDL2 window) and the simulator dep.
+- Created `examples/iris_demo_sim.rs`: mirrors the scene and theme from `iris_demo.rs` but uses `SimulatorDisplay<Rgb565>` instead of the real EPD, and maps mouse clicks to touch and arrow keys to focus navigation.
+- Run command (macOS Apple Silicon): `cargo run --example iris_demo_sim --features sim --target aarch64-apple-darwin --config 'unstable.build-std=["std"]'`
+- The `--config` flag overrides the workspace's bare-metal `build-std` so the host stdlib is used.
+- Requires SDL2 installed (`brew install sdl2` on macOS).
+- Also moved `rustflags = ["-C", "link-arg=-nostartfiles"]` from `[build]` to `[target.xtensa-esp32s3-none-elf]` in `.cargo/config.toml` so it no longer applies to host builds.
+- Gated `build.rs` linker flags (`-Tlinkall.x` and `--error-handling-script`) behind `CARGO_CFG_TARGET_ARCH == "xtensa"` so they don't fire for host builds.
+
 ## 2026-07-27
 
 **Updated: link iris-ui to local path and update iris_demo for new API**

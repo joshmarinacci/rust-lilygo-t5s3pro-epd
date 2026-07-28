@@ -1,8 +1,13 @@
 use std::{fs, path::PathBuf};
 
 fn main() {
-    linker_be_nice();
-    println!("cargo:rustc-link-arg=-Tlinkall.x");
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    let is_xtensa = target_arch == "xtensa";
+
+    if is_xtensa {
+        linker_be_nice();
+        println!("cargo:rustc-link-arg=-Tlinkall.x");
+    }
 
     // Generate synthetic image data for the graphics_test example.
     // Both files use 4-bit grayscale packed BigEndian: high nibble = left pixel.
