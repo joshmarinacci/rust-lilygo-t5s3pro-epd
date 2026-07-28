@@ -13,11 +13,8 @@ log                    = "0.4"
 embedded-hal           = "1"
 embedded-graphics-core = "0.4"
 embedded-graphics      = "0.8"
-fontdue                = "0.9"
-esp-storage = { version = "0.4", features = ["esp32s3", "nor-flash"] }
-embedded-storage = "0.3"
-miniz_oxide = { version = "0.8", default-features = false, features = ["with-alloc"] }
-xmlparser   = { version = "0.13", default-features = false }
+esp-storage            = { version = "0.4", features = ["esp32s3", "nor-flash"] }
+embedded-storage       = "0.3"
 embedded-storage-async = "0.4"
 sequential-storage = "3.0"
 esp-radio       = { version = "0.18.0", features = ["wifi", "esp32s3"] }
