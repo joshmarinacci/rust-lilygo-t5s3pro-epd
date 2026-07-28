@@ -1,3 +1,10 @@
+## 2026-07-28 (2)
+
+**Added: `gps` example — read NMEA location fixes from onboard GPS module**
+- Created `examples/gps.rs`: powers up the GPS module via PCA9555 I/O expander (I2C 0x20, port-0 all-high), opens UART1 on GPIO44 (RX) / GPIO43 (TX) at 9600 baud, reads NMEA bytes into a line buffer, and parses `$GNGGA` / `$GPGGA` sentences for location, fix quality, satellite count, HDOP, and altitude.
+- Compatible with both the Quectel L76K and u-blox MIA-M10Q GPS chips auto-detected by the Lilygo T5 E-Paper S3 Pro (no chip-specific init commands needed).
+- Run: `cargo run --example gps`
+
 ## 2026-07-28
 
 **Added: `iris_demo_sim` example — simulator variant of `iris_demo` for local development**
