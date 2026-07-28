@@ -1,3 +1,8 @@
+## 2026-07-28 (4)
+
+**Updated: README — added LoRa (`lora_rx`) section with configuration table and notes**
+- Added `## LoRa (lora_rx)` section explaining the four config constants (`FREQ_HZ`, `SF`, `BW`, `CR`), continuous RX mode behaviour, LDRO auto-enable rule, and why frequency mismatch is the most common failure mode.
+
 ## 2026-07-28 (3)
 
 **Added: `lora_rx` example — passively receive LoRa packets on the onboard SX1262**

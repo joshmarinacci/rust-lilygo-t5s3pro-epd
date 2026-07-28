@@ -93,6 +93,29 @@ cargo run --example touch_button
 The `--monitor` flag is included automatically via `.cargo/config.toml`, so serial output appears in the terminal after
 flashing.
 
+## LoRa (`lora_rx`)
+
+The `lora_rx` example uses raw SPI commands against the onboard SX1262 — no external driver crate is needed. It
+configures the chip for continuous receive and prints every packet it hears.
+
+**Configuration** — edit the four constants at the top of `examples/lora_rx.rs`:
+
+| Constant | Default | Notes |
+|---|---|---|
+| `FREQ_HZ` | `915_000_000` | 915 MHz (US/AU). Use `868_000_000` for EU. **Must match the transmitter.** |
+| `SF` | `7` | Spreading factor 5–12. Higher SF = longer range, slower data rate. |
+| `BW` | `0x04` | `0x04`=125 kHz · `0x05`=250 kHz · `0x06`=500 kHz |
+| `CR` | `0x01` | Coding rate: `0x01`=4/5 · `0x02`=4/6 · `0x03`=4/7 · `0x04`=4/8 |
+
+**Frequency is the most important setting** — a mismatch means no packets will be received at all. SF, BW, and CR
+mismatches may still receive packets but will produce CRC errors.
+
+The chip is put into **continuous RX mode** (`timeout=0xFFFFFF`), so it never returns to standby between packets.
+DIO1 fires an interrupt after each packet; the code busy-polls the pin.
+
+Low data-rate optimisation (LDRO) is automatically enabled when SF ≥ 11 with BW = 125 kHz, which is the only
+combination where it is required.
+
 ## Simulator (no hardware required)
 
 `iris_demo_sim` is a host-native variant of `iris_demo` that renders into an SDL2 window using
