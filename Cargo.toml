@@ -24,6 +24,8 @@ esp-println            = { version = "0.17.0", features = ["esp32s3", "log-04"] 
 esp-storage            = { version = "0.4", features = ["esp32s3", "nor-flash"] }
 esp-radio              = { version = "0.18.0", features = ["wifi", "esp32s3"] }
 esp-rtos               = { version = "0.3.0",  features = ["esp32s3", "esp-radio", "embassy"] }
+embedded-sdmmc         = { version = "0.9", default-features = false }
+embedded-hal-bus       = "0.2"
 embassy-executor       = "0.10.0"
 embassy-net            = { version = "0.8.0",  features = ["dhcpv4", "medium-ethernet", "udp"] }
 embassy-time           = "0.5.0"

@@ -1,3 +1,13 @@
+## 2026-07-28 (5)
+
+**Added: `sd_list` example — detect SD card and recursively list filesystem**
+- Created `examples/sd_list.rs`: initialises SPI2 (GPIO14/13/21, CS=GPIO12), wraps the bus in `ExclusiveDevice` (from `embedded-hal-bus`), creates an `embedded-sdmmc` `SdCard` and `VolumeManager`, opens Volume 0, and recursively prints the entire directory tree.
+- Prints "no SD card detected" on `SdCardError::CardNotFound`; distinguishes other hardware errors.
+- Recursive listing capped at depth 8; uses `PSRAM` heap via `psram_allocator!` for `Vec` entry collection (required because `iterate_dir` prohibits VolumeManager calls inside its callback).
+- `VolumeManager` created with `MAX_DIRS=16` so up to 15 levels of nesting can be open simultaneously.
+- Added `embedded-sdmmc = "0.9"` and `embedded-hal-bus = "0.2"` to Cargo.toml (xtensa target deps).
+- Run: `cargo run --example sd_list`
+
 ## 2026-07-28 (4)
 
 **Updated: README — added LoRa (`lora_rx`) section with configuration table and notes**
