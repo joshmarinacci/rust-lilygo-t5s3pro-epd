@@ -1,3 +1,8 @@
+## 2026-07-28 (10)
+
+**Added: `docs/drawing-algorithms.md` — detailed drawing algorithm documentation**
+- Covers framebuffer layout (4bpp packed, 259 KB on PSRAM), tainted-row dirty tracking (68-byte bitmask), DrawMode (BlackOnWhite / WhiteOnBlack / WhiteOnWhite), the 15-frame waveform flush pipeline, the 65536-entry LUT system (indexed by 16-bit 4-pixel groups, evolved each frame via `update_lut`), DMA buffer preparation (LUT lookup → u32 packing → bit reversal for MSB-first panel format), column clipping via `flush_clip`, the hardware row protocol (I8080 + RMT CKV + STV/LEH signals), the row-skip optimization, the hardware clear cycle, power sequence, rotation transform, and double-flush pattern.
+
 ## 2026-07-28 (9)
 
 **Added: `Display::flush_clip` — column-clipped waveform flush**
