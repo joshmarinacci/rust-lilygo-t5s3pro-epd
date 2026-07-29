@@ -1,3 +1,31 @@
+## 2026-07-28 (9)
+
+**Added: `Display::flush_clip` — column-clipped waveform flush**
+- Added `flush_clip(mode, clip: Rectangle)` to `src/driver/display.rs`. Confines the waveform to the clip rectangle by masking out-of-clip pixels to VCOM (0b00, no drive) in the DMA buffer before each row is sent to the panel. Pixels outside the clip receive no drive signal even though the row is still transmitted; the e-paper panel ignores VCOM-coded pixels.
+- Added private `clip_dma_buffer(buf, x_start, x_end)`: zeros the 2-bit waveform codes for out-of-clip pixels. Handles full-byte masking for completely out-of-clip groups and per-pixel bit-pair masking for boundary groups. Byte `b` after bit-reversal encodes pixels `b*4..b*4+3` with the leftmost pixel at bits 7-6.
+- Refactored internal `draw()` → `draw_inner(mode, clip_x_start, clip_x_end)`; `flush()` passes `(0, WIDTH)` (no clipping); `flush_clip` passes the clip bounds.
+- Re-exported `Rectangle` from `epaper::driver` (was only public within the crate).
+- **Updated `partial_repaint_bench`**: reverted to original centered sizes `[(50,30),(100,60),(200,120)]`, replaced `flush` calls with `flush_clip`, restored µs/pixel metric (now meaningful since only the rectangle pixels are driven).
+
+## 2026-07-28 (8)
+
+**Fixed: `partial_repaint_bench` — ghost bands from partial-width rows**
+- Changed rectangle sizes from centered partial-width `[(50,30),(100,60),(200,120)]` to full-width `[(960,30),(960,80),(960,200)]`.
+- Root cause: the e-paper waveform always processes complete rows (no per-column masking). With a partial-width rectangle, the pixels to the left/right of the rect in each dirty row are repeatedly driven white by every WhiteOnBlack pass while rows above/below are never touched. After ~10 iterations, the accumulated particle-state difference becomes visible as horizontal ghost bands extending from the sides of the rectangle.
+- Full-width rectangles eliminate the outside-rect area entirely, so all pixels in dirty rows receive identical waveform treatment.
+- Changed the per-pixel statistic to per-row (`µs/row`) since e-paper cost scales with row count, not pixel count within a row.
+
+## 2026-07-28 (7)
+
+**Added: `partial_repaint_bench` example — partial repaint speed benchmark**
+- Created `examples/partial_repaint_bench.rs`: uses embedded-graphics (no iris-ui) to benchmark e-paper partial refresh performance.
+- Fills a centred rectangle with "hello" text and alternates between black-on-white and white-on-black 20 times per size.
+- Tests three rectangle sizes: 50×30, 100×60, 200×120 (centred on the 960×540 screen).
+- Each flip uses the correct two-pass sequence (WhiteOnBlack erase + BlackOnWhite render) to avoid ghosting.
+- Reports min/max/avg round-trip ms and µs/pixel to serial; prints `display.clear()` time at startup.
+- Added `partial_repaint_bench` row to README examples table.
+- Run: `cargo run --example partial_repaint_bench`
+
 ## 2026-07-28 (6)
 
 **Updated: `sd_list` — add timing output**

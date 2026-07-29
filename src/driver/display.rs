@@ -140,7 +140,26 @@ impl<'a> Display<'a> {
 
     pub fn flush(&mut self, mode: DrawMode) -> Result<()> {
         debug!("display flush");
-        self.draw(mode)?;
+        self.draw_inner(mode, 0, Self::WIDTH)?;
+        self.tainted_rows.fill(0);
+        self.framebuffer.fill(0xFF);
+        Ok(())
+    }
+
+    /// Like `flush`, but confines the waveform to `clip`.
+    ///
+    /// Pixels outside the clip column range receive VCOM (no drive) even if
+    /// their row is dirty. This prevents ghost bands when only a sub-width
+    /// rectangle is being updated: the driver always transmits full rows, but
+    /// out-of-clip pixels are masked to 0b00 in the DMA buffer so the panel
+    /// never actually drives them.
+    ///
+    /// Row-axis clipping is still handled by the dirty-row bitmap as usual,
+    /// so only rows within `clip.y .. clip.y + clip.height` need to be tainted.
+    pub fn flush_clip(&mut self, mode: DrawMode, clip: Rectangle) -> Result<()> {
+        debug!("display flush_clip");
+        let x_end = clip.x.saturating_add(clip.width).min(Self::WIDTH);
+        self.draw_inner(mode, clip.x, x_end)?;
         self.tainted_rows.fill(0);
         self.framebuffer.fill(0xFF);
         Ok(())
@@ -326,7 +345,9 @@ impl<'a> Display<'a> {
     }
 
     const DRAW_IMAGE_FRAME_COUNT: usize = 15;
-    fn draw(&mut self, mode: DrawMode) -> Result<()> {
+
+    fn draw_inner(&mut self, mode: DrawMode, clip_x_start: u16, clip_x_end: u16) -> Result<()> {
+        let clipping = clip_x_start > 0 || clip_x_end < Self::WIDTH;
         let mut lut = vec![mode.lut_default(); 1 << 16];
 
         for k in 0..Self::DRAW_IMAGE_FRAME_COUNT {
@@ -340,7 +361,10 @@ impl<'a> Display<'a> {
                 }
                 let start = y as usize * LINE_BYTES_4BPP;
                 let end = start + LINE_BYTES_4BPP;
-                let buf = prepare_dma_buffer(&self.framebuffer[start..end], &lut);
+                let mut buf = prepare_dma_buffer(&self.framebuffer[start..end], &lut);
+                if clipping {
+                    clip_dma_buffer(&mut buf, clip_x_start, clip_x_end);
+                }
                 self.epd.set_buffer(buf.as_slice())?;
                 self.row_write(mode.contrast_cycles()[k])?;
             }
@@ -395,6 +419,28 @@ fn prepare_dma_buffer(line_data: &[u8], conversion_lut: &[u8]) -> Vec<u8> {
     }
 
     epd_input
+}
+
+/// Zero out the waveform drive codes for pixels outside [x_start, x_end).
+///
+/// Each byte in the post-bit-reversal DMA buffer encodes 4 pixels:
+///   bits 7-6 = pixel b*4+0, bits 5-4 = b*4+1, bits 3-2 = b*4+2, bits 1-0 = b*4+3
+/// Setting a 2-bit pair to 0b00 outputs VCOM (no drive) for that pixel.
+fn clip_dma_buffer(buf: &mut [u8], x_start: u16, x_end: u16) {
+    for (b, byte) in buf.iter_mut().enumerate() {
+        let px_base = b as u16 * 4;
+        if px_base + 4 <= x_start || px_base >= x_end {
+            *byte = 0x00;
+        } else if px_base < x_start || px_base + 4 > x_end {
+            for p in 0u16..4 {
+                let px = px_base + p;
+                if px < x_start || px >= x_end {
+                    // p=0 → bits 7-6 (shift 6), p=1 → 5-4 (shift 4), etc.
+                    *byte &= !(0b11u8 << (6 - p as u8 * 2));
+                }
+            }
+        }
+    }
 }
 
 fn update_lut(conversion_lut: &mut [u8], k: usize, mode: DrawMode) {

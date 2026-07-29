@@ -20,7 +20,7 @@ pub enum Error {
 pub type Result<T> = core::result::Result<T, Error>;
 
 pub use crate::driver::{
-    display::{Display, DrawMode},
+    display::{Display, DrawMode, Rectangle},
     ed047tc1::PinConfig,
     gt911::Gt911,
 };

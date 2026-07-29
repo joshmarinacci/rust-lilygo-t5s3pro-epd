@@ -84,6 +84,7 @@ cargo run --example <name>
 | `gps`            | Enables the onboard GPS module via PCA9555 I/O expander, reads NMEA sentences over UART1 (GPIO44 RX / GPIO43 TX, 9600 baud), and prints `$GNGGA` location fixes in both NMEA DDMM and decimal-degree format; compatible with L76K and MIA-M10Q |
 | `lora_rx`        | Puts the onboard SX1262 into continuous-receive mode and prints each received packet (hex dump + ASCII + RSSI/SNR) to serial; frequency, SF, BW, and CR are constants at the top of the file |
 | `sd_list`        | Detects whether a micro-SD card is inserted (CS=GPIO12, SPI2), mounts the FAT filesystem via `embedded-sdmmc`, and recursively prints the full directory tree with file sizes; gracefully reports "no card detected" if the slot is empty |
+| `partial_repaint_bench` | Benchmarks partial repaint speed at three rectangle sizes (50×30, 100×60, 200×120); alternates black-on-white / white-on-black fills 20× per size and reports min/max/avg round-trip ms and µs/pixel to serial |
 
 **Example:**
 
