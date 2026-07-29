@@ -39,7 +39,7 @@ use iris_ui::{
     view::{Align, Flex, ViewId},
 };
 use iris_ui::toggle_button::make_toggle_button;
-use epaper::driver::{Display, DrawMode, Gt911};
+use epaper::driver::{Display, DrawMode, Gt911, Rectangle};
 use epaper::driver::gt911::GT911_ADDR_PRIMARY;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -216,13 +216,33 @@ fn main() -> ! {
         // Touch input → hit-test the scene, dispatch Tap event
         if let Some((tx, ty)) = display.read_touch(&mut gt911) {
             let pt = iris_ui::geom::Point::new(((tx as u32) / SCALE) as i32,((ty as u32)/SCALE) as i32);
-            esp_println::println!("[iris] {}", pt);
+            esp_println::println!("[iris] touch {}", pt);
 
-            needs_flush = true;
             if let Some(result) = click_at(&mut scene, &empty_handlers, pt) {
                 handle_action(result.action, &mut scene);
-                needs_flush = true;
+
+                // Partial redraw: dirty_rect was set to just the clicked view's bounds
+                // by the toggle button input handler. Use flush_clip to confine the
+                // waveform to that region so the rest of the screen is not disturbed.
+                let dirty = scene.dirty_rect;
+                let scaled = dirty.scaled(SCALE);
+                let clip_rect = Rectangle {
+                    x: scaled.position.x.max(0) as u16,
+                    y: scaled.position.y.max(0) as u16,
+                    width: scaled.size.w.max(0) as u16,
+                    height: scaled.size.h.max(0) as u16,
+                };
+                esp_println::println!("[iris] partial flush {:?}", clip_rect);
+                render(&mut display, &mut scene, SCALE);
+                display.flush_clip(DrawMode::WhiteOnBlack, clip_rect).unwrap();
+                // mark_dirty_all sets dirty=true; then override dirty_rect to restore
+                // the precise clip for the second (BlackOnWhite) pass.
+                scene.mark_dirty_all();
+                scene.dirty_rect = dirty;
+                render(&mut display, &mut scene, SCALE);
+                display.flush_clip(DrawMode::BlackOnWhite, clip_rect).unwrap();
             }
+
             // Wait for finger lift before continuing
             loop {
                 delay.delay_millis(20);

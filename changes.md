@@ -1,3 +1,10 @@
+## 2026-07-29
+
+**Modified: `examples/iris_demo.rs` — partial redraw on toggle button click**
+- Touch clicks on the toggle button now use `flush_clip` to confine the two-pass waveform (WhiteOnBlack + BlackOnWhite) to just the toggle button's bounding rectangle, instead of redrawing the full 960×540 display.
+- After `click_at`, the scene's `dirty_rect` already holds precisely the touched view's bounds (set by `input_toggle_button` via `mark_dirty_view`). The render clip is taken from that rect before the first pass; `dirty_rect` is restored for the second pass via `mark_dirty_all()` + override.
+- Physical button navigation (BOOT/GPIO38) still uses the full `flush` path since focus changes may affect multiple views.
+
 ## 2026-07-28 (10)
 
 **Added: `docs/drawing-algorithms.md` — detailed drawing algorithm documentation**
